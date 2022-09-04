@@ -1,38 +1,38 @@
-/*  
+/*
  *  BlueSCSI
  *  Copyright (c) 2021  Eric Helgeson, Androda
- *  
- *  This file is free software: you may copy, redistribute and/or modify it  
- *  under the terms of the GNU General Public License as published by the  
- *  Free Software Foundation, either version 2 of the License, or (at your  
- *  option) any later version.  
- *  
- *  This file is distributed in the hope that it will be useful, but  
- *  WITHOUT ANY WARRANTY; without even the implied warranty of  
- *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU  
- *  General Public License for more details.  
- *  
- *  You should have received a copy of the GNU General Public License  
- *  along with this program.  If not, see https://github.com/erichelgeson/bluescsi.  
- *  
- * This file incorporates work covered by the following copyright and  
- * permission notice:  
- *  
- *     Copyright (c) 2019 komatsu   
- *  
- *     Permission to use, copy, modify, and/or distribute this software  
- *     for any purpose with or without fee is hereby granted, provided  
- *     that the above copyright notice and this permission notice appear  
- *     in all copies.  
- *  
- *     THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL  
- *     WARRANTIES WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED  
- *     WARRANTIES OF MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE  
- *     AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT, INDIRECT, OR  
- *     CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS  
- *     OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT,  
- *     NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN  
- *     CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.  
+ *
+ *  This file is free software: you may copy, redistribute and/or modify it
+ *  under the terms of the GNU General Public License as published by the
+ *  Free Software Foundation, either version 2 of the License, or (at your
+ *  option) any later version.
+ *
+ *  This file is distributed in the hope that it will be useful, but
+ *  WITHOUT ANY WARRANTY; without even the implied warranty of
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ *  General Public License for more details.
+ *
+ *  You should have received a copy of the GNU General Public License
+ *  along with this program.  If not, see https://github.com/erichelgeson/bluescsi.
+ *
+ * This file incorporates work covered by the following copyright and
+ * permission notice:
+ *
+ *     Copyright (c) 2019 komatsu
+ *
+ *     Permission to use, copy, modify, and/or distribute this software
+ *     for any purpose with or without fee is hereby granted, provided
+ *     that the above copyright notice and this permission notice appear
+ *     in all copies.
+ *
+ *     THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL
+ *     WARRANTIES WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED
+ *     WARRANTIES OF MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE
+ *     AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT, INDIRECT, OR
+ *     CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM LOSS
+ *     OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT,
+ *     NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
+ *     CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
 #include <Arduino.h> // For Platform.IO
@@ -52,6 +52,7 @@
 #include "scsi_sense.h"
 #include "scsi_status.h"
 #include "scsi_mode.h"
+#include "USBComposite.h"
 
 #ifdef USE_STM32_DMA
 #warning "warning USE_STM32_DMA"
@@ -60,6 +61,12 @@
 // SDFAT
 SdFs SD;
 FsFile LOG_FILE;
+#ifdef USB_PASSTHROUGH
+USBMassStorage ms;
+uint8_t num_usb_volumes = 0;
+FsFile *usb_files[USB_MASS_MAX_DRIVES];
+#endif
+bool USBMode = false;
 
 volatile bool m_isBusReset = false;   // Bus reset
 volatile bool m_resetJmp = false;     // Call longjmp on reset
@@ -126,6 +133,96 @@ void onBusReset(void);
 void initFileLog(int);
 void finalizeFileLog(void);
 void findDriveImages(FsFile root);
+
+#ifdef USB_PASSTHROUGH
+bool usb_write(const uint8_t *writeBuff, uint32_t startSector, uint16_t numSectors, uint32_t disk) {
+  bool success;
+  LED_ON();
+  usb_files[disk]->seek(startSector * SCSI_BLOCK_SIZE);
+  success = (usb_files[disk]->write(writeBuff, numSectors * SCSI_BLOCK_SIZE) == (numSectors * SCSI_BLOCK_SIZE));
+  LED_OFF();
+  return success;
+}
+
+bool usb_read(uint8_t *readBuff, uint32_t startSector, uint16_t numSectors, uint32_t disk) {
+  bool success;
+  LED_ON();
+  usb_files[disk]->seek(startSector * SCSI_BLOCK_SIZE);
+  success = (usb_files[disk]->read(readBuff, numSectors * SCSI_BLOCK_SIZE) == (numSectors * SCSI_BLOCK_SIZE));
+  LED_OFF();
+  return success;
+}
+
+bool usb_read0(uint8_t *readBuff, uint32_t startSector, uint16_t numSectors) {
+  return usb_read(readBuff, startSector, numSectors, 0);
+}
+
+bool usb_write0(const uint8_t *writeBuff, uint32_t startSector, uint16_t numSectors) {
+  return usb_write(writeBuff, startSector, numSectors, 0);
+}
+
+bool usb_read1(uint8_t *readBuff, uint32_t startSector, uint16_t numSectors) {
+  return usb_read(readBuff, startSector, numSectors, 1);
+}
+
+bool usb_write1(const uint8_t *writeBuff, uint32_t startSector, uint16_t numSectors) {
+  return usb_write(writeBuff, startSector, numSectors, 1);
+}
+
+bool usb_read2(uint8_t *readBuff, uint32_t startSector, uint16_t numSectors) {
+  return usb_read(readBuff, startSector, numSectors, 2);
+}
+
+bool usb_write2(const uint8_t *writeBuff, uint32_t startSector, uint16_t numSectors) {
+  return usb_write(writeBuff, startSector, numSectors, 2);
+}
+
+bool usb_read3(uint8_t *readBuff, uint32_t startSector, uint16_t numSectors) {
+  return usb_read(readBuff, startSector, numSectors, 3);
+}
+
+bool usb_write3(const uint8_t *writeBuff, uint32_t startSector, uint16_t numSectors) {
+  return usb_write(writeBuff, startSector, numSectors, 3);
+}
+
+bool usb_read4(uint8_t *readBuff, uint32_t startSector, uint16_t numSectors) {
+  return usb_read(readBuff, startSector, numSectors, 4);
+}
+
+bool usb_write4(const uint8_t *writeBuff, uint32_t startSector, uint16_t numSectors) {
+  return usb_write(writeBuff, startSector, numSectors, 4);
+}
+
+bool usb_read5(uint8_t *readBuff, uint32_t startSector, uint16_t numSectors) {
+  return usb_read(readBuff, startSector, numSectors, 5);
+}
+
+bool usb_write5(const uint8_t *writeBuff, uint32_t startSector, uint16_t numSectors) {
+  return usb_write(writeBuff, startSector, numSectors, 5);
+}
+
+bool usb_read6(uint8_t *readBuff, uint32_t startSector, uint16_t numSectors) {
+  return usb_read(readBuff, startSector, numSectors, 6);
+}
+
+bool usb_write6(const uint8_t *writeBuff, uint32_t startSector, uint16_t numSectors) {
+  return usb_write(writeBuff, startSector, numSectors, 6);
+}
+
+bool usb_read7(uint8_t *readBuff, uint32_t startSector, uint16_t numSectors) {
+  return usb_read(readBuff, startSector, numSectors, 7);
+}
+
+bool usb_write7(const uint8_t *writeBuff, uint32_t startSector, uint16_t numSectors) {
+  return usb_write(writeBuff, startSector, numSectors, 7);
+}
+
+static const MassStorageReader usb_read_functions[USB_MASS_MAX_DRIVES] = {usb_read0, usb_read1, usb_read2, usb_read3,
+                                                                          usb_read4, usb_read5, usb_read6, usb_read7};
+static const MassStorageWriter usb_write_functions[USB_MASS_MAX_DRIVES] = {usb_write0, usb_write1, usb_write2, usb_write3,
+                                                                           usb_write4, usb_write5, usb_write6, usb_write7};
+#endif
+
 
 /*
  * IO read.
@@ -274,7 +371,7 @@ void setup()
   scsi_command_table[SCSI_RELEASE] = onNOP;
   scsi_command_table[SCSI_RESERVE] = onNOP;
   scsi_command_table[SCSI_TEST_UNIT_READY] = onNOP;
-  
+
   // SCSI commands that have handlers
   scsi_command_table[SCSI_REZERO_UNIT] = onReZeroUnit;
   scsi_command_table[SCSI_REQUEST_SENSE] = onRequestSense;
@@ -343,7 +440,7 @@ void setup()
   pinMode(TR_TARGET, OUTPUT);
   pinMode(TR_INITIATOR, OUTPUT);
   pinMode(TR_DBP, OUTPUT);
-  
+
   TRANSCEIVER_IO_SET(vTR_INITIATOR,TR_INPUT);
 #endif
 
@@ -358,7 +455,7 @@ void setup()
 
 #ifdef XCVR
   TRANSCEIVER_IO_SET(vTR_DBP,TR_INPUT);
-  
+
   // Initiator port
   pinMode(ATN, INPUT);
   pinMode(BSY, INPUT);
@@ -452,8 +549,31 @@ void setup()
 
   finalizeFileLog();
   LED_OFF();
-  //Occurs when the RST pin state changes from HIGH to LOW
-  attachInterrupt(RST, onBusReset, FALLING);
+
+  #ifdef USB_PASSTHROUGH
+  if (num_usb_volumes > 0) {
+    ms.clearDrives();
+    for (int i = 0; i < num_usb_volumes;  i += 1) {
+      ms.setDriveData(i, usb_files[i]->size() / SCSI_BLOCK_SIZE, usb_read_functions[i], usb_write_functions[i]);
+    }
+    ms.registerComponent();
+    USBComposite.begin();
+
+    //allow 1 second for the PC to enumerate the USB device, otherwise switch to SCSI mode
+    for (int i = 0; i < 100; i += 1) {
+      if (USBComposite) {
+        USBMode = true;
+        break;
+      }
+      delay(10);
+    }
+  }
+  #endif
+
+  if (!USBMode) {
+    //Occurs when the RST pin state changes from HIGH to LOW
+    attachInterrupt(RST, onBusReset, FALLING);
+  }
 }
 
 void findDriveImages(FsFile root) {
@@ -489,7 +609,7 @@ void findDriveImages(FsFile root) {
         int lun = 0;
         int blk = 512;
 
-        // Positionally read in and coerase the chars to integers.
+        // Positionally read in and coerce the chars to integers.
         // We only require the minimum and read in the next if provided.
         int file_name_length = strlen(name);
         if(file_name_length > 2) { // HD[N]
@@ -539,14 +659,22 @@ void findDriveImages(FsFile root) {
           image_ready = hddimageOpen(dev, file, id, lun, blk);
           if(image_ready) { // Marked as a responsive ID
             scsi_id_mask |= 1<<id;
-            
+
             switch(dev->m_type)
             {
               case SCSI_DEVICE_HDD:
               // default SCSI HDD
-              dev->inquiry_block = &default_hdd;        
+              dev->inquiry_block = &default_hdd;
+
+              #ifdef USB_PASSTHROUGH
+              //add active hard disk images to the USB passthrough list
+              if (num_usb_volumes < USB_MASS_MAX_DRIVES) {
+                usb_files[num_usb_volumes] = file;
+                num_usb_volumes += 1;
+              }
+              #endif
               break;
-              
+
               case SCSI_DEVICE_OPTICAL:
               // default SCSI CDROM
               dev->inquiry_block = &default_optical;
@@ -633,7 +761,7 @@ void finalizeFileLog() {
         LOG_FILE.print((dev->m_blocksize<1000) ? ": " : ":");
         LOG_FILE.print(dev->m_blocksize);
       }
-      else      
+      else
         LOG_FILE.print(":----");
     }
     LOG_FILE.println(":");
@@ -718,7 +846,7 @@ void onBusReset(void)
     }
   }
 }
-    
+
 /*
  * Enable the reset longjmp, and check if reset fired while it was disabled.
  */
@@ -740,7 +868,7 @@ inline byte readHandshake(void)
   byte r = readIO();
   SCSI_OUT(vREQ,inactive)
   while( SCSI_IN(vACK));
-  return r;  
+  return r;
 }
 
 /*
@@ -875,7 +1003,7 @@ void writeDataPhaseSD(SCSI_DEVICE *dev, uint32_t adds, uint32_t len)
 
 #pragma GCC push_options
 #pragma GCC optimize ("-Os")
-    
+
 /*
  * See writeDataLoop for optimization info.
  */
@@ -998,7 +1126,7 @@ byte onRequestSense(SCSI_DEVICE *dev, const byte *cdb)
   };
   dev->m_senseKey = 0;
   dev->m_additional_sense_code = 0;
-  writeDataPhase(cdb[4] < 18 ? cdb[4] : 18, buf);  
+  writeDataPhase(cdb[4] < 18 ? cdb[4] : 18, buf);
 
   return SCSI_STATUS_GOOD;
 }
@@ -1029,7 +1157,7 @@ byte onReadCapacity(SCSI_DEVICE *dev, const byte *cdb)
 byte checkBlockCommand(SCSI_DEVICE *dev, uint32_t adds, uint32_t len)
 {
   // Check block range is valid
-  if (adds >= dev->m_blockcount || (adds + len) > dev->m_blockcount) {    
+  if (adds >= dev->m_blockcount || (adds + len) > dev->m_blockcount) {
     dev->m_senseKey = SCSI_SENSE_ILLEGAL_REQUEST;
     dev->m_additional_sense_code = SCSI_ASC_LOGICAL_BLOCK_ADDRESS_OUT_OF_RANGE;
     return SCSI_STATUS_CHECK_CONDITION;
@@ -1051,12 +1179,12 @@ static byte onRead6(SCSI_DEVICE *dev, const byte *cdb)
   LOG(":");
   LOGHEXN(len);
   */
-   
+
   byte sts = checkBlockCommand(dev, adds, len);
   if (sts) {
     return sts;
   }
-  
+
   writeDataPhaseSD(dev, adds, len);
   return SCSI_STATUS_GOOD;
 }
@@ -1076,7 +1204,7 @@ static byte onRead10(SCSI_DEVICE *dev, const byte *cdb)
   if (sts) {
     return sts;
   }
-  
+
   writeDataPhaseSD(dev, adds, len);
   return SCSI_STATUS_GOOD;
 }
@@ -1102,7 +1230,7 @@ static byte onWrite6(SCSI_DEVICE *dev, const byte *cdb)
     dev->m_additional_sense_code = SCSI_ASC_WRITE_PROTECTED; // Write Protect
     return SCSI_STATUS_CHECK_CONDITION;
   }
-  
+
   byte sts = checkBlockCommand(dev, adds, len);
   if (sts) {
     return sts;
@@ -1183,7 +1311,7 @@ byte onModeSense(SCSI_DEVICE *dev, const byte *cdb)
       0, //Reserve
       dev->m_blocksize >> 16,
       dev->m_blocksize >> 8,
-      dev->m_blocksize,    
+      dev->m_blocksize,
     };
     memcpy(&m_buf[a], c, 8);
     a += 8;
@@ -1230,7 +1358,7 @@ byte onModeSense(SCSI_DEVICE *dev, const byte *cdb)
     m_buf[a + 0] = SCSI_SENSE_MODE_FLEXABLE_GEOMETRY;
     m_buf[a + 1] = 0x1E;  // Page length
     if(pageControl != 1) {
-      m_buf[a + 2] = 0x03; 
+      m_buf[a + 2] = 0x03;
       m_buf[a + 3] = 0xE8; // Transfer rate 1 mbit/s
       m_buf[a + 4] = 16; // Number of heads
       m_buf[a + 5] = 18; // Sectors per track
@@ -1279,7 +1407,7 @@ byte onModeSense(SCSI_DEVICE *dev, const byte *cdb)
   writeDataPhase(cdb[4] < a ? cdb[4] : a, m_buf);
   return SCSI_STATUS_GOOD;
 }
-    
+
 byte onModeSelect(SCSI_DEVICE *dev, const byte *cdb)
 {
   unsigned length = 0;
@@ -1332,7 +1460,7 @@ byte onReZeroUnit(SCSI_DEVICE *dev, const byte *cdb) {
  */
 byte onWriteBuffer(SCSI_DEVICE *dev, const byte *cdb)
 {
-  byte mode = cdb[1] & 7; 
+  byte mode = cdb[1] & 7;
   uint32_t allocLength = ((uint32_t)cdb[6] << 16) | ((uint32_t)cdb[7] << 8) | cdb[8];
 
   LOGN("-WriteBuffer");
@@ -1377,9 +1505,9 @@ byte onWriteBuffer(SCSI_DEVICE *dev, const byte *cdb)
  */
 byte onReadBuffer(SCSI_DEVICE *dev, const byte *cdb)
 {
-  byte mode = cdb[1] & 7; 
+  byte mode = cdb[1] & 7;
   uint32_t allocLength = ((uint32_t)cdb[6] << 16) | ((uint32_t)cdb[7] << 8) | cdb[8];
-  
+
   LOGN("-ReadBuffer");
   LOGHEXN(mode);
   LOGHEXN(allocLength);
@@ -1471,247 +1599,269 @@ void MsgIn2(int msg)
   writeHandshake(msg);
 }
 
+void scsi_loop();
+void usb_loop();
 /*
  * Main loop.
  */
-void loop() 
+void loop()
 {
-#ifdef XCVR
-  // Reset all DB and Target pins, switch transceivers to input
-  // Precaution against bugs or jumps which don't clean up properly
-  SCSI_DB_INPUT();
-  TRANSCEIVER_IO_SET(vTR_DBP,TR_INPUT)
-  SCSI_TARGET_INACTIVE();
-  TRANSCEIVER_IO_SET(vTR_INITIATOR,TR_INPUT)
-#endif
-
-  //int msg = 0;
-  m_msg = 0;
-  m_lun = 0xff;
-  SCSI_DEVICE *dev = (SCSI_DEVICE *)0; // HDD image for current SCSI-ID, LUN
-
-  do {} while( !SCSI_IN(vBSY) || SCSI_IN(vRST));
-  // We're in ARBITRATION
-  //LOG(" A:"); LOGHEX(readIO()); LOG(" ");
-  
-  do {} while( SCSI_IN(vBSY) || !SCSI_IN(vSEL) || SCSI_IN(vRST));
-  //LOG(" S:"); LOGHEX(readIO()); LOG(" ");
-  // We're in SELECTION
-  
-  byte scsiid = readIO() & scsi_id_mask;
-  if(SCSI_IN(vIO) || (scsiid) == 0) {
-    delayMicroseconds(1);
-    return;
+  if (USBMode) {
+    LED_OFF();
+    usb_loop();
+  } else {
+    scsi_loop();
   }
-  // We've been selected
+}
 
+void usb_loop() {
+  while (1) {
+    #ifdef USB_PASSTHROUGH
+    ms.loop();
+    #endif
+  }
+}
+
+void scsi_loop()
+{
+  while (1) {
   #ifdef XCVR
-  // Reconfigure target pins to output mode, after resetting their values
-  GPIOB->regs->BSRR = 0x000000E8; // MSG, CD, REQ, IO
-  //  GPIOA->regs->BSRR = 0x00000200; // BSY
-#endif
-  SCSI_TARGET_ACTIVE()  // (BSY), REQ, MSG, CD, IO output turned on
+    // Reset all DB and Target pins, switch transceivers to input
+    // Precaution against bugs or jumps which don't clean up properly
+    SCSI_DB_INPUT();
+    TRANSCEIVER_IO_SET(vTR_DBP,TR_INPUT)
+    SCSI_TARGET_INACTIVE();
+    TRANSCEIVER_IO_SET(vTR_INITIATOR,TR_INPUT)
+  #endif
 
-  // Set BSY to-when selected
-  SCSI_BSY_ACTIVE();     // Turn only BSY output ON, ACTIVE
+    //int msg = 0;
+    m_msg = 0;
+    m_lun = 0xff;
+    SCSI_DEVICE *dev = (SCSI_DEVICE *)0; // HDD image for current SCSI-ID, LUN
 
-  // Wait until SEL becomes inactive
-  while(isHigh(gpio_read(SEL))) {}
-  
-  // Ask for a TARGET-ID to respond
-  m_id = 31 - __builtin_clz(scsiid);
+    do {} while( !SCSI_IN(vBSY) || SCSI_IN(vRST));
+    // We're in ARBITRATION
+    //LOG(" A:"); LOGHEX(readIO()); LOG(" ");
 
-  m_isBusReset = false;
-  if (setjmp(m_resetJmpBuf) == 1) {
-    LOGN("Reset, going to BusFree");
-    goto BusFree;
-  }
-  enableResetJmp();
-  
-  // In SCSI-2 this is mandatory, but in SCSI-1 it's optional 
-  if(isHigh(gpio_read(ATN))) {
-    SCSI_PHASE_CHANGE(SCSI_PHASE_MESSAGEOUT);
-    // Bus settle delay 400ns. Following code was measured at 350ns before REQ asserted. Added another 50ns. STM32F103.
-    SCSI_PHASE_CHANGE(SCSI_PHASE_MESSAGEOUT);// 28ns delay STM32F103
-    SCSI_PHASE_CHANGE(SCSI_PHASE_MESSAGEOUT);// 28ns delay STM32F103
-    bool syncenable = false;
-    int syncperiod = 50;
-    int syncoffset = 0;
-    int msc = 0;
-    while(isHigh(gpio_read(ATN)) && msc < 255) {
-      m_msb[msc++] = readHandshake();
+    do {} while( SCSI_IN(vBSY) || !SCSI_IN(vSEL) || SCSI_IN(vRST));
+    //LOG(" S:"); LOGHEX(readIO()); LOG(" ");
+    // We're in SELECTION
+
+    byte scsiid = readIO() & scsi_id_mask;
+    if(SCSI_IN(vIO) || (scsiid) == 0) {
+      delayMicroseconds(1);
+      return;
     }
-    for(int i = 0; i < msc; i++) {
-      // ABORT
-      if (m_msb[i] == 0x06) {
-        goto BusFree;
+    // We've been selected
+
+    #ifdef XCVR
+    // Reconfigure target pins to output mode, after resetting their values
+    GPIOB->regs->BSRR = 0x000000E8; // MSG, CD, REQ, IO
+    //  GPIOA->regs->BSRR = 0x00000200; // BSY
+  #endif
+    SCSI_TARGET_ACTIVE()  // (BSY), REQ, MSG, CD, IO output turned on
+
+    // Set BSY to-when selected
+    SCSI_BSY_ACTIVE();     // Turn only BSY output ON, ACTIVE
+
+    // Wait until SEL becomes inactive
+    while(isHigh(gpio_read(SEL))) {}
+
+    // Ask for a TARGET-ID to respond
+    m_id = 31 - __builtin_clz(scsiid);
+
+    m_isBusReset = false;
+    if (setjmp(m_resetJmpBuf) == 1) {
+      LOGN("Reset, going to BusFree");
+      goto BusFree;
+    }
+    enableResetJmp();
+
+    // In SCSI-2 this is mandatory, but in SCSI-1 it's optional
+    if(isHigh(gpio_read(ATN))) {
+      SCSI_PHASE_CHANGE(SCSI_PHASE_MESSAGEOUT);
+      // Bus settle delay 400ns. Following code was measured at 350ns before REQ asserted. Added another 50ns. STM32F103.
+      SCSI_PHASE_CHANGE(SCSI_PHASE_MESSAGEOUT);// 28ns delay STM32F103
+      SCSI_PHASE_CHANGE(SCSI_PHASE_MESSAGEOUT);// 28ns delay STM32F103
+      bool syncenable = false;
+      int syncperiod = 50;
+      int syncoffset = 0;
+      int msc = 0;
+      while(isHigh(gpio_read(ATN)) && msc < 255) {
+        m_msb[msc++] = readHandshake();
       }
-      // BUS DEVICE RESET
-      if (m_msb[i] == 0x0C) {
-        syncoffset = 0;
-        goto BusFree;
-      }
-      // IDENTIFY
-      if (m_msb[i] >= 0x80) {
-        m_lun = m_msb[i] & 0x1f;
-      }
-      // Extended message
-      if (m_msb[i] == 0x01) {
-        // Check only when synchronous transfer is possible
-        if (!syncenable || m_msb[i + 2] != 0x01) {
-          MsgIn2(0x07);
+      for(int i = 0; i < msc; i++) {
+        // ABORT
+        if (m_msb[i] == 0x06) {
+          goto BusFree;
+        }
+        // BUS DEVICE RESET
+        if (m_msb[i] == 0x0C) {
+          syncoffset = 0;
+          goto BusFree;
+        }
+        // IDENTIFY
+        if (m_msb[i] >= 0x80) {
+          m_lun = m_msb[i] & 0x1f;
+        }
+        // Extended message
+        if (m_msb[i] == 0x01) {
+          // Check only when synchronous transfer is possible
+          if (!syncenable || m_msb[i + 2] != 0x01) {
+            MsgIn2(0x07);
+            break;
+          }
+          // Transfer period factor(50 x 4 = Limited to 200ns)
+          syncperiod = m_msb[i + 3];
+          if (syncperiod > 50) {
+            syncperiod = 50;
+          }
+          // REQ/ACK offset(Limited to 16)
+          syncoffset = m_msb[i + 4];
+          if (syncoffset > 16) {
+            syncoffset = 16;
+          }
+          // STDR response message generation
+          MsgIn2(0x01);
+          MsgIn2(0x03);
+          MsgIn2(0x01);
+          MsgIn2(syncperiod);
+          MsgIn2(syncoffset);
           break;
         }
-        // Transfer period factor(50 x 4 = Limited to 200ns)
-        syncperiod = m_msb[i + 3];
-        if (syncperiod > 50) {
-          syncperiod = 50;
-        }
-        // REQ/ACK offset(Limited to 16)
-        syncoffset = m_msb[i + 4];
-        if (syncoffset > 16) {
-          syncoffset = 16;
-        }
-        // STDR response message generation
-        MsgIn2(0x01);
-        MsgIn2(0x03);
-        MsgIn2(0x01);
-        MsgIn2(syncperiod);
-        MsgIn2(syncoffset);
-        break;
       }
     }
-  }
 
-  LOG("Command:");
-  SCSI_PHASE_CHANGE(SCSI_PHASE_COMMAND);
-  // Bus settle delay 400ns. The following code was measured at 20ns before REQ asserted. Added another 380ns. STM32F103.
-  asm("nop;nop;nop;nop;nop;nop;nop;nop");// This asm causes some code reodering, which adds 270ns, plus 8 nop cycles for an additional 110ns. STM32F103
-  int len;
-  byte cmd[20];
+    LOG("Command:");
+    SCSI_PHASE_CHANGE(SCSI_PHASE_COMMAND);
+    // Bus settle delay 400ns. The following code was measured at 20ns before REQ asserted. Added another 380ns. STM32F103.
+    asm("nop;nop;nop;nop;nop;nop;nop;nop");// This asm causes some code reodering, which adds 270ns, plus 8 nop cycles for an additional 110ns. STM32F103
+    int len;
+    byte cmd[20];
 
-  cmd[0] = readHandshake();
-  // Atari ST ICD extension support
-  // It sends a 0x1F as a indicator there is a 
-  // proper full size SCSI command byte to follow
-  // so just read it and re-read it again to get the
-  // real command byte
-  if(cmd[0] == SCSI_ICD_EXTENDED_CMD) { cmd[0] = readHandshake(); }
+    cmd[0] = readHandshake();
+    // Atari ST ICD extension support
+    // It sends a 0x1F as a indicator there is a
+    // proper full size SCSI command byte to follow
+    // so just read it and re-read it again to get the
+    // real command byte
+    if(cmd[0] == SCSI_ICD_EXTENDED_CMD) { cmd[0] = readHandshake(); }
 
-  LOGHEX(cmd[0]);
-  // Command length selection, reception
-  static const int cmd_class_len[8]={6,10,10,6,6,12,6,6};
-  len = cmd_class_len[cmd[0] >> 5];
-  cmd[1] = readHandshake(); LOG(":");LOGHEX(cmd[1]);
-  cmd[2] = readHandshake(); LOG(":");LOGHEX(cmd[2]);
-  cmd[3] = readHandshake(); LOG(":");LOGHEX(cmd[3]);
-  cmd[4] = readHandshake(); LOG(":");LOGHEX(cmd[4]);
-  cmd[5] = readHandshake(); LOG(":");LOGHEX(cmd[5]);
-  // Receive the remaining commands
-  for(int i = 6; i < len; i++ ) {
-    cmd[i] = readHandshake();
-    LOG(":");
-    LOGHEX(cmd[i]);
-  }
-  // LUN confirmation
-  // if it wasn't set in the IDENTIFY then grab it from the CDB
-  if(m_lun > MAX_SCSILUN)
-  {
-      m_lun = (cmd[1] & 0xe0) >> 5;
-  }
-
-  LOG(":ID ");
-  LOG(m_id);
-  LOG(":LUN ");
-  LOG(m_lun);
-  LOGN("");
-
-  // HDD Image selection
-  if(m_lun >= NUM_SCSILUN)
-  {
-    m_sts = SCSI_STATUS_GOOD;
-
-    // REQUEST SENSE and INQUIRY are handled different with invalid LUNs
-    if(cmd[0] == SCSI_INQUIRY)
-    {
-      // Special INQUIRY handling for invalid LUNs
-      LOGN("onInquiry - InvalidLUN");
-      dev = &(scsi_device_list[m_id][0]);
-
-      byte temp = dev->inquiry_block->raw[0];
-
-      // If the LUN is invalid byte 0 of inquiry block needs to be 7fh
-      dev->inquiry_block->raw[0] = 0x7f;
-
-      // only write back what was asked for
-      writeDataPhase(cmd[4], dev->inquiry_block->raw);
-
-      // return it back to normal if it was altered
-      dev->inquiry_block->raw[0] = temp;
+    LOGHEX(cmd[0]);
+    // Command length selection, reception
+    static const int cmd_class_len[8]={6,10,10,6,6,12,6,6};
+    len = cmd_class_len[cmd[0] >> 5];
+    cmd[1] = readHandshake(); LOG(":");LOGHEX(cmd[1]);
+    cmd[2] = readHandshake(); LOG(":");LOGHEX(cmd[2]);
+    cmd[3] = readHandshake(); LOG(":");LOGHEX(cmd[3]);
+    cmd[4] = readHandshake(); LOG(":");LOGHEX(cmd[4]);
+    cmd[5] = readHandshake(); LOG(":");LOGHEX(cmd[5]);
+    // Receive the remaining commands
+    for(int i = 6; i < len; i++ ) {
+      cmd[i] = readHandshake();
+      LOG(":");
+      LOGHEX(cmd[i]);
     }
-    else if(cmd[0] == SCSI_REQUEST_SENSE)
+    // LUN confirmation
+    // if it wasn't set in the IDENTIFY then grab it from the CDB
+    if(m_lun > MAX_SCSILUN)
     {
-      byte buf[18] = {
-        0x70,   //CheckCondition
-        0,      //Segment number
-        SCSI_SENSE_ILLEGAL_REQUEST,   //Sense key
-        0, 0, 0, 0,  //information
-        10,   //Additional data length
-        0, 0, 0, 0, // command specific information bytes
-        (byte)(SCSI_ASC_LOGICAL_UNIT_NOT_SUPPORTED >> 8),
-        (byte)SCSI_ASC_LOGICAL_UNIT_NOT_SUPPORTED,
-        0, 0, 0, 0,
-      };
-      writeDataPhase(cmd[4] < 18 ? cmd[4] : 18, buf);      
+        m_lun = (cmd[1] & 0xe0) >> 5;
     }
-    else
-    {    
+
+    LOG(":ID ");
+    LOG(m_id);
+    LOG(":LUN ");
+    LOG(m_lun);
+    LOGN("");
+
+    // HDD Image selection
+    if(m_lun >= NUM_SCSILUN)
+    {
+      m_sts = SCSI_STATUS_GOOD;
+
+      // REQUEST SENSE and INQUIRY are handled different with invalid LUNs
+      if(cmd[0] == SCSI_INQUIRY)
+      {
+        // Special INQUIRY handling for invalid LUNs
+        LOGN("onInquiry - InvalidLUN");
+        dev = &(scsi_device_list[m_id][0]);
+
+        byte temp = dev->inquiry_block->raw[0];
+
+        // If the LUN is invalid byte 0 of inquiry block needs to be 7fh
+        dev->inquiry_block->raw[0] = 0x7f;
+
+        // only write back what was asked for
+        writeDataPhase(cmd[4], dev->inquiry_block->raw);
+
+        // return it back to normal if it was altered
+        dev->inquiry_block->raw[0] = temp;
+      }
+      else if(cmd[0] == SCSI_REQUEST_SENSE)
+      {
+        byte buf[18] = {
+          0x70,   //CheckCondition
+          0,      //Segment number
+          SCSI_SENSE_ILLEGAL_REQUEST,   //Sense key
+          0, 0, 0, 0,  //information
+          10,   //Additional data length
+          0, 0, 0, 0, // command specific information bytes
+          (byte)(SCSI_ASC_LOGICAL_UNIT_NOT_SUPPORTED >> 8),
+          (byte)SCSI_ASC_LOGICAL_UNIT_NOT_SUPPORTED,
+          0, 0, 0, 0,
+        };
+        writeDataPhase(cmd[4] < 18 ? cmd[4] : 18, buf);
+      }
+      else
+      {
+        m_sts = SCSI_STATUS_CHECK_CONDITION;
+      }
+
+      goto Status;
+    }
+
+    dev = &(scsi_device_list[m_id][m_lun]);
+    if(!dev->m_file)
+    {
+      dev->m_senseKey = SCSI_SENSE_ILLEGAL_REQUEST;
+      dev->m_additional_sense_code = SCSI_ASC_LOGICAL_UNIT_NOT_SUPPORTED;
       m_sts = SCSI_STATUS_CHECK_CONDITION;
+      goto Status;
     }
 
-    goto Status;
+    LED_ON();
+    m_sts = scsi_command_table[cmd[0]](dev, cmd);
+    LED_OFF();
+
+  Status:
+    LOGN("Sts");
+    SCSI_PHASE_CHANGE(SCSI_PHASE_STATUS);
+    // Bus settle delay 400ns built in to writeHandshake
+    writeHandshake(m_sts);
+
+    LOGN("MsgIn");
+    SCSI_PHASE_CHANGE(SCSI_PHASE_MESSAGEIN);
+    // Bus settle delay 400ns built in to writeHandshake
+    writeHandshake(m_msg);
+
+  BusFree:
+    LOGN("BusFree");
+    m_isBusReset = false;
+    //SCSI_OUT(vREQ,inactive) // gpio_write(REQ, low);
+    //SCSI_OUT(vMSG,inactive) // gpio_write(MSG, low);
+    //SCSI_OUT(vCD ,inactive) // gpio_write(CD, low);
+    //SCSI_OUT(vIO ,inactive) // gpio_write(IO, low);
+    //SCSI_OUT(vBSY,inactive)
+    SCSI_TARGET_INACTIVE() // Turn off BSY, REQ, MSG, CD, IO output
+  #ifdef XCVR
+    TRANSCEIVER_IO_SET(vTR_TARGET,TR_INPUT);
+    // Something in code linked after this function is performing better with a +4 alignment.
+    // Adding this nop is causing the next function (_GLOBAL__sub_I_SD) to have an address with a last digit of 0x4.
+    // Last digit of 0xc also works.
+    // This affects both with and without XCVR, currently without XCVR doesn't need any padding.
+    // Until the culprit can be tracked down and fixed, it may be necessary to do manual adjustment.
+    asm("nop.w");
+  #endif
   }
-
-  dev = &(scsi_device_list[m_id][m_lun]);
-  if(!dev->m_file)
-  {
-    dev->m_senseKey = SCSI_SENSE_ILLEGAL_REQUEST;
-    dev->m_additional_sense_code = SCSI_ASC_LOGICAL_UNIT_NOT_SUPPORTED;
-    m_sts = SCSI_STATUS_CHECK_CONDITION;
-    goto Status;
-  }
-
-  LED_ON();
-  m_sts = scsi_command_table[cmd[0]](dev, cmd);
-  LED_OFF();
-
-Status:
-  LOGN("Sts");
-  SCSI_PHASE_CHANGE(SCSI_PHASE_STATUS);
-  // Bus settle delay 400ns built in to writeHandshake
-  writeHandshake(m_sts);
-
-  LOGN("MsgIn");
-  SCSI_PHASE_CHANGE(SCSI_PHASE_MESSAGEIN);
-  // Bus settle delay 400ns built in to writeHandshake
-  writeHandshake(m_msg);
-
-BusFree:
-  LOGN("BusFree");
-  m_isBusReset = false;
-  //SCSI_OUT(vREQ,inactive) // gpio_write(REQ, low);
-  //SCSI_OUT(vMSG,inactive) // gpio_write(MSG, low);
-  //SCSI_OUT(vCD ,inactive) // gpio_write(CD, low);
-  //SCSI_OUT(vIO ,inactive) // gpio_write(IO, low);
-  //SCSI_OUT(vBSY,inactive)
-  SCSI_TARGET_INACTIVE() // Turn off BSY, REQ, MSG, CD, IO output
-#ifdef XCVR
-  TRANSCEIVER_IO_SET(vTR_TARGET,TR_INPUT);
-  // Something in code linked after this function is performing better with a +4 alignment.
-  // Adding this nop is causing the next function (_GLOBAL__sub_I_SD) to have an address with a last digit of 0x4.
-  // Last digit of 0xc also works.
-  // This affects both with and without XCVR, currently without XCVR doesn't need any padding.
-  // Until the culprit can be tracked down and fixed, it may be necessary to do manual adjustment.
-  asm("nop.w");
-#endif
 }
