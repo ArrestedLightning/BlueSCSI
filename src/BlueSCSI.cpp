@@ -66,7 +66,8 @@ USBMassStorage ms;
 uint8_t num_usb_volumes = 0;
 FsFile *usb_files[USB_MASS_MAX_DRIVES];
 #endif
-bool USBMode = false;
+bool usb_enabled = true;
+bool usb_active = false;
 
 volatile bool m_isBusReset = false;   // Bus reset
 volatile bool m_resetJmp = false;     // Call longjmp on reset
@@ -517,6 +518,13 @@ void setup()
   // Iterate over the root path in the SD card looking for candidate image files.
   FsFile root;
 
+  //allow disabling USB by placing a file named "nousb" in the SD card
+  //could be useful if the USB startup delay causes compatibility problems
+  if (root.open("nousb")) {
+    usb_enabled = false;
+  }
+  root.close();
+
   char image_set_dir_name[] = "/ImageSetX/";
   image_set_dir_name[9] = char(image_file_set) + 0x30;
   root.open(image_set_dir_name);
@@ -551,26 +559,28 @@ void setup()
   LED_OFF();
 
   #ifdef USB_PASSTHROUGH
-  if (num_usb_volumes > 0) {
-    ms.clearDrives();
-    for (int i = 0; i < num_usb_volumes;  i += 1) {
-      ms.setDriveData(i, usb_files[i]->size() / SCSI_BLOCK_SIZE, usb_read_functions[i], usb_write_functions[i]);
-    }
-    ms.registerComponent();
-    USBComposite.begin();
-
-    //allow 1 second for the PC to enumerate the USB device, otherwise switch to SCSI mode
-    for (int i = 0; i < 100; i += 1) {
-      if (USBComposite) {
-        USBMode = true;
-        break;
+  if (usb_enabled) {
+    if (num_usb_volumes > 0) {
+      ms.clearDrives();
+      for (int i = 0; i < num_usb_volumes;  i += 1) {
+        ms.setDriveData(i, usb_files[i]->size() / SCSI_BLOCK_SIZE, usb_read_functions[i], usb_write_functions[i]);
       }
-      delay(10);
+      ms.registerComponent();
+      USBComposite.begin();
+
+      //allow 1 second for the PC to enumerate the USB device, otherwise switch to SCSI mode
+      for (int i = 0; i < 100; i += 1) {
+        if (USBComposite) {
+          usb_active = true;
+          break;
+        }
+        delay(10);
+      }
     }
   }
   #endif
 
-  if (!USBMode) {
+  if (!usb_active) {
     //Occurs when the RST pin state changes from HIGH to LOW
     attachInterrupt(RST, onBusReset, FALLING);
   }
@@ -1606,7 +1616,7 @@ void usb_loop();
  */
 void loop()
 {
-  if (USBMode) {
+  if (usb_active) {
     LED_OFF();
     usb_loop();
   } else {
