@@ -43,8 +43,10 @@
                                 // 1: Debug information output to USB Serial
                                 // 2: Debug information output to LOG.txt (slow)
 
+#define PRODUCT_NAME "DIETSCSI"
+#define PRODUCT_URL "https://github.com/ArrestedLightning/dietSCSI"
 // Log File
-#define VERSION "1.1-SNAPSHOT-20220627"
+#define VERSION "1.1d-SNAPSHOT-20220627"
 #define LOG_FILENAME "LOG.txt"
 
 #include "BlueSCSI.h"
@@ -399,7 +401,7 @@ void setup()
   default_hdd.response_format = 1;
   default_hdd.additional_length = 31;
   memcpy(&default_hdd.vendor, "QUANTUM", 7);
-  memcpy(&default_hdd.product, "BLUESCSI F1", 11);
+  memcpy(&default_hdd.product, PRODUCT_NAME " F1", 11);
   memcpy(&default_hdd.revision, "1.0", 3);
 
   // default SCSI CDROM
@@ -410,7 +412,7 @@ void setup()
   default_optical.response_format = 1;
   default_optical.additional_length = 42;
   default_optical.sync = 1;
-  memcpy(&default_optical.vendor, "BLUESCSI", 8);
+  memcpy(&default_optical.vendor, PRODUCT_NAME, 8);
   memcpy(&default_optical.product, "CD-ROM CDU-55S", 14);
   memcpy(&default_optical.revision, "1.9a", 4);
   default_optical.release = 0x20;
@@ -712,7 +714,7 @@ void findDriveImages(FsFile root) {
  */
 void initFileLog(int success_mhz) {
   LOG_FILE = SD.open(LOG_FILENAME, O_WRONLY | O_CREAT | O_TRUNC);
-  LOG_FILE.println("BlueSCSI <-> SD - https://github.com/erichelgeson/BlueSCSI");
+  LOG_FILE.println(PRODUCT_NAME " <-> SD - " PRODUCT_URL);
   LOG_FILE.print("VERSION: ");
   LOG_FILE.print(VERSION);
   LOG_FILE.println(BUILD_TAGS);
