@@ -65,8 +65,8 @@ FsFile LOG_FILE;
 USBMassStorage ms;
 uint8_t num_usb_volumes = 0;
 FsFile *usb_files[USB_MASS_MAX_DRIVES];
-#endif
 bool usb_enabled = true;
+#endif
 bool usb_active = false;
 
 volatile bool m_isBusReset = false;   // Bus reset
@@ -518,12 +518,14 @@ void setup()
   // Iterate over the root path in the SD card looking for candidate image files.
   FsFile root;
 
+#ifdef USB_PASSTHROUGH
   //allow disabling USB by placing a file named "nousb" in the SD card
   //could be useful if the USB startup delay causes compatibility problems
   if (root.open("nousb")) {
     usb_enabled = false;
   }
   root.close();
+#endif
 
   char image_set_dir_name[] = "/ImageSetX/";
   image_set_dir_name[9] = char(image_file_set) + 0x30;
