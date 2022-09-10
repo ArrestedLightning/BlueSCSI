@@ -46,7 +46,7 @@
 #define PRODUCT_NAME "DIETSCSI"
 #define PRODUCT_URL "https://github.com/ArrestedLightning/dietSCSI"
 // Log File
-#define VERSION "1.1d-SNAPSHOT-20220627"
+#define VERSION "1.2d-SNAPSHOT-20220907"
 #define LOG_FILENAME "LOG.txt"
 
 #include "BlueSCSI.h"
@@ -54,7 +54,9 @@
 #include "scsi_sense.h"
 #include "scsi_status.h"
 #include "scsi_mode.h"
+#ifdef USB_PASSTHROUGH
 #include "USBComposite.h"
+#endif
 
 #ifdef USE_STM32_DMA
 #warning "warning USE_STM32_DMA"
@@ -67,8 +69,8 @@ FsFile LOG_FILE;
 USBMassStorage ms;
 uint8_t num_usb_volumes = 0;
 FsFile *usb_files[USB_MASS_MAX_DRIVES];
-#endif
 bool usb_enabled = true;
+#endif
 bool usb_active = false;
 
 volatile bool m_isBusReset = false;   // Bus reset
@@ -520,12 +522,14 @@ void setup()
   // Iterate over the root path in the SD card looking for candidate image files.
   FsFile root;
 
+#ifdef USB_PASSTHROUGH
   //allow disabling USB by placing a file named "nousb" in the SD card
   //could be useful if the USB startup delay causes compatibility problems
   if (root.open("nousb")) {
     usb_enabled = false;
   }
   root.close();
+#endif
 
   char image_set_dir_name[] = "/ImageSetX/";
   image_set_dir_name[9] = char(image_file_set) + 0x30;
@@ -740,7 +744,7 @@ void initFileLog(int success_mhz) {
   LOG_FILE.print(success_mhz);
   LOG_FILE.println("Mhz");
   if(success_mhz == 25) {
-    LOG_FILE.println("SPI running at half speed - read https://github.com/erichelgeson/BlueSCSI/wiki/Slow-SPI");
+    LOG_FILE.println("Note: SPI running at half speed - performance will be reduced.");
   }
   LOG_FILE.print("SdFat Max FileName Length: ");
   LOG_FILE.println(MAX_FILE_PATH);
