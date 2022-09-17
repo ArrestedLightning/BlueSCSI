@@ -52,7 +52,9 @@
 #include "scsi_sense.h"
 #include "scsi_status.h"
 #include "scsi_mode.h"
+#ifdef USB_PASSTHROUGH
 #include "USBComposite.h"
+#endif
 
 #ifdef USE_STM32_DMA
 #warning "warning USE_STM32_DMA"
@@ -681,8 +683,11 @@ void findDriveImages(FsFile root) {
               #ifdef USB_PASSTHROUGH
               //add active hard disk images to the USB passthrough list
               if (num_usb_volumes < USB_MASS_MAX_DRIVES) {
-                usb_files[num_usb_volumes] = file;
-                num_usb_volumes += 1;
+                //only allow passthrough on 512 byte block images for now
+                if (blk == SCSI_BLOCK_SIZE) {
+                  usb_files[num_usb_volumes] = file;
+                  num_usb_volumes += 1;
+                }
               }
               #endif
               break;
