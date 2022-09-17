@@ -685,8 +685,11 @@ void findDriveImages(FsFile root) {
               #ifdef USB_PASSTHROUGH
               //add active hard disk images to the USB passthrough list
               if (num_usb_volumes < USB_MASS_MAX_DRIVES) {
-                usb_files[num_usb_volumes] = file;
-                num_usb_volumes += 1;
+                //only allow passthrough on 512 byte block images for now
+                if (blk == SCSI_BLOCK_SIZE) {
+                  usb_files[num_usb_volumes] = file;
+                  num_usb_volumes += 1;
+                }
               }
               #endif
               break;
