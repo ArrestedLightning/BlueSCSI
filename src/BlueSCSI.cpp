@@ -224,6 +224,10 @@ static const MassStorageReader usb_read_functions[USB_MASS_MAX_DRIVES] = {usb_re
                                                                           usb_read4, usb_read5, usb_read6, usb_read7};
 static const MassStorageWriter usb_write_functions[USB_MASS_MAX_DRIVES] = {usb_write0, usb_write1, usb_write2, usb_write3,
                                                                            usb_write4, usb_write5, usb_write6, usb_write7};
+
+static void configure_usb_descriptors(void) {
+  USBComposite.setSerialString(getDeviceIDString());
+}
 #endif
 
 
@@ -564,6 +568,7 @@ void setup()
 
   #ifdef USB_PASSTHROUGH
   if (usb_enabled) {
+    configure_usb_descriptors();
     if (num_usb_volumes > 0) {
       ms.clearDrives();
       for (int i = 0; i < num_usb_volumes;  i += 1) {
