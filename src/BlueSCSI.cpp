@@ -39,6 +39,9 @@
 #include <SdFat.h>
 #include <setjmp.h>
 
+#define STRINGIFY(x) #x
+#define TOSTRING(x) STRINGIFY(x)
+
 #define DEBUG            0      // 0:No debug information output
                                 // 1: Debug information output to USB Serial
                                 // 2: Debug information output to LOG.txt (slow)
@@ -46,7 +49,10 @@
 #define PRODUCT_NAME "DIETSCSI"
 #define PRODUCT_URL "https://github.com/ArrestedLightning/dietSCSI"
 // Log File
-#define VERSION "1.2d-SNAPSHOT-20220907"
+#define MAJOR_VERSION 1
+#define MINOR_VERSION 2
+
+#define VERSION TOSTRING(MAJOR_VERSION) "." TOSTRING(MINOR_VERSION) "d-SNAPSHOT-20220907"
 #define LOG_FILENAME "LOG.txt"
 
 #include "BlueSCSI.h"
@@ -231,6 +237,7 @@ static void configure_usb_descriptors(void) {
   USBComposite.setSerialString(getDeviceIDString());
   USBComposite.setManufacturerString("Arrested Lightning");
   USBComposite.setProductString("dietSCSI");
+  USBComposite.setProductVersion((MAJOR_VERSION << 8) | MINOR_VERSION);
 }
 #endif
 
