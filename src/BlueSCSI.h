@@ -15,6 +15,11 @@
 #define SCSI_BUF_SIZE 512      // Size of the SCSI Buffer
 #define HDD_BLOCK_SIZE 512
 #define OPTICAL_BLOCK_SIZE 2048
+#define BLUESCSI_INI "bluescsi.ini"
+
+#define SCSI_VENDOR_LENGTH 8
+#define SCSI_PRODUCT_LENGTH 16
+#define SCSI_REVISION_LENGTH 4
 
 // HDD format
 #define MAX_BLOCKSIZE 4096     // Maximum BLOCK size
@@ -26,6 +31,29 @@
 #define ERROR_FALSE_INIT  3
 #define ERROR_NO_SDCARD   5
 
+enum SCSI_DEVICE_TYPE
+{
+  SCSI_DEVICE_HDD,
+  SCSI_DEVICE_OPTICAL,
+};
+
+#define SCSI_DEVICE_FLAG_OPTICAL_MODE2   0x1
+#define SCSI_DEVICE_FLAG_OPTICAL_RAW     0x2
+
+#define SET_DEVICE_FLAG(var, flag) (var |= flag)
+#define UNSET_DEVICE_FLAG(var, flag) (var &= ~flag)
+#define IS_DEVICE_FLAG_SET(var, flag) ((var & flag) == flag)
+#define IS_RAW(var) IS_DEVICE_FLAG_SET(var, SCSI_DEVICE_FLAG_OPTICAL_RAW)
+#define IS_MODE2(var) IS_DEVICE_FLAG_SET(var, SCSI_DEVICE_FLAG_OPTICAL_MODE2)
+
+#define INT_TO_CHAR(var) var+'0'
+#define CHAR_TO_INT(var) var-'0'
+
+#define CDROM_RAW_SECTORSIZE    2352
+#define CDROM_COMMON_SECTORSIZE 2048
+
+#define MAX_SCSI_COMMAND  0xff
+#define SCSI_COMMAND_HANDLER(x) static byte x(SCSI_DEVICE *dev, const byte *cdb)
 
 #if DEBUG
 #define LOG(XX)     Serial.print(XX)
@@ -71,8 +99,6 @@
 #define IO        PB7      // SCSI:I/O
 
 #define SD_CS     PA4      // SDCARD:CS
-#define LED       PC13     // LED
-#define LED2      PA0      // External LED
 
 // Image Set Selector
 #ifdef XCVR
@@ -88,16 +114,28 @@
 #define PBREG GPIOB->regs
 #define PCREG GPIOC->regs
 
-// LED control
-#define LED_ON()  PCREG->BSRR = 0b00100000000000000000000000000000; PAREG->BSRR = 0b00000000000000000000000000000001;
-#define LED_OFF() PCREG->BSRR = 0b00000000000000000010000000000000; PAREG->BSRR = 0b00000000000000010000000000000000;
-
 // Virtual pin (Arduio compatibility is slow, so make it MCU-dependent)
 #define PA(BIT)       (BIT)
 #define PB(BIT)       (BIT+16)
+#define PC(BIT)       (BIT+32)
+
 // Virtual pin decoding
-#define GPIOREG(VPIN)    ((VPIN)>=16?PBREG:PAREG)
+#define GPIOREG(VPIN)    ((VPIN)>=16?((VPIN)>=32?PCREG:PBREG):PAREG)
 #define BITMASK(VPIN) (1<<((VPIN)&15))
+
+// Built-in LED
+#define LED       PC13
+#define vLED      PC(13)
+#define LED_MODE  GPIO_OUTPUT_OD
+
+// External LED
+#define LED2      PA0
+#define vLED2     PA(0)
+#define LED2_MODE GPIO_OUTPUT_PP
+
+// LED control
+#define LED_ON() GPIOREG(vLED)->BSRR = BITMASK(vLED) << (LED_MODE == GPIO_OUTPUT_PP ? 0 : 16); GPIOREG(vLED2)->BSRR = BITMASK(vLED2) << (LED2_MODE == GPIO_OUTPUT_PP ? 0 : 16);
+#define LED_OFF() GPIOREG(vLED)->BSRR = BITMASK(vLED) << (LED_MODE == GPIO_OUTPUT_PP ? 16 : 0); GPIOREG(vLED2)->BSRR = BITMASK(vLED2) << (LED2_MODE == GPIO_OUTPUT_PP ? 16 : 0);
 
 #define vATN       PA(8)      // SCSI:ATN
 #define vBSY       PA(9)      // SCSI:BSY
@@ -113,7 +151,7 @@
 // SCSI output pin control: opendrain active LOW (direct pin drive)
 #define SCSI_OUT(VPIN,ACTIVE) { GPIOREG(VPIN)->BSRR = BITMASK(VPIN)<<((ACTIVE)?16:0); }
 
-// SCSI input pin check (inactive=0,avtive=1)
+// SCSI input pin check (inactive=0,active=1)
 #define SCSI_IN(VPIN) ((~GPIOREG(VPIN)->IDR>>(VPIN&15))&1)
 
 #define NOP(x) for(unsigned _nopcount = x; _nopcount; _nopcount--) { asm("NOP"); }
@@ -144,7 +182,7 @@
 |  1 | 1 | 1  |  MESSAGE IN   |       Initiator from target   /  |  phase     |
 |-----------------------------------------------------------------------------|
 | Key:  0 = False,  1 = True,  * = Reserved for future standardization        |
-+=============================================================================+ 
++=============================================================================+
 */
 // SCSI phase change as single write to port B
 #define SCSIPHASEMASK(MSGACTIVE, CDACTIVE, IOACTIVE) ((BITMASK(vMSG)<<((MSGACTIVE)?16:0)) | (BITMASK(vCD)<<((CDACTIVE)?16:0)) | (BITMASK(vIO)<<((IOACTIVE)?16:0)))
@@ -178,7 +216,7 @@
 
 #define SCSI_TARGET_ACTIVE()   { gpio_mode(REQ, GPIO_OUTPUT_PP); gpio_mode(MSG, GPIO_OUTPUT_PP); gpio_mode(CD, GPIO_OUTPUT_PP); gpio_mode(IO, GPIO_OUTPUT_PP); gpio_mode(BSY, GPIO_OUTPUT_PP);  TRANSCEIVER_IO_SET(vTR_TARGET,TR_OUTPUT);}
 // BSY,REQ,MSG,CD,IO Turn off output, BSY is the last input
-#define SCSI_TARGET_INACTIVE() { pinMode(REQ, INPUT); pinMode(MSG, INPUT); pinMode(CD, INPUT); pinMode(IO, INPUT); pinMode(BSY, INPUT); TRANSCEIVER_IO_SET(vTR_TARGET,TR_INPUT); }
+#define SCSI_TARGET_INACTIVE() { gpio_mode(REQ, GPIO_INPUT_FLOATING); gpio_mode(MSG, GPIO_INPUT_FLOATING); gpio_mode(CD, GPIO_INPUT_FLOATING); gpio_mode(IO, GPIO_INPUT_FLOATING); gpio_mode(BSY, GPIO_INPUT_FLOATING); TRANSCEIVER_IO_SET(vTR_TARGET,TR_INPUT); }
 
 #define DB_MODE_OUT 1  // push-pull mode
 #define DB_MODE_IN  4  // floating inputs
@@ -207,20 +245,22 @@
 // Put DB and DP in output mode
 #define SCSI_DB_OUTPUT() { PBREG->CRL=(PBREG->CRL &0xfffffff0)|DB_MODE_OUT; PBREG->CRH = 0x11111111*DB_MODE_OUT; }
 // Put DB and DP in input mode
-#define SCSI_DB_INPUT()  { PBREG->CRL=(PBREG->CRL &0xfffffff0)|DB_MODE_IN ; PBREG->CRH = 0x11111111*DB_MODE_IN; }
+#define SCSI_DB_INPUT()  { PBREG->CRL=(PBREG->CRL &0xfffffff0)|DB_MODE_IN ; PBREG->CRH = (uint32_t)0x11111111*DB_MODE_IN; }
 
 // HDDiamge file
 #define HDIMG_ID_POS  2                 // Position to embed ID number
 #define HDIMG_LUN_POS 3                 // Position to embed LUN numbers
 #define HDIMG_BLK_POS 5                 // Position to embed block size numbers
-#define MAX_FILE_PATH 32                // Maximum file name length
-
+#define MAX_FILE_PATH 64                // Maximum file name length
+#define MAX_MAC_PATH 32                 // Maximum file name length on vintage macs
+#define MAC_BLK_SIZE 4096
 /*
  *  Data byte to BSRR register setting value and parity table
 */
 
 // Parity bit generation
-#define PTY(V)   (1^((V)^((V)>>1)^((V)>>2)^((V)>>3)^((V)>>4)^((V)>>5)^((V)>>6)^((V)>>7))&1)
+//#define PTY(V)   (1^((V)^((V)>>1)^((V)>>2)^((V)>>3)^((V)>>4)^((V)>>5)^((V)>>6)^((V)>>7))&1)
+#define PTY(n) ((1 ^ (n) ^ ((n)>>1) ^ ((n)>>2) ^ ((n)>>3) ^ ((n)>>4) ^ ((n)>>5) ^ ((n)>>6) ^ ((n)>>7)) & 1)
 
 // Data byte to BSRR register setting value conversion table
 // BSRR[31:24] =  DB[7:0]
@@ -250,16 +290,9 @@ uint32_t db_bsrr[256];
 // #define GET_CDB6_LBA(x) ((x[2] & 01f) << 16) | (x[3] << 8) | x[4]
 #define READ_DATA_BUS() (byte)((~(uint32_t)GPIOB->regs->IDR)>>8)
 
-enum SCSI_DEVICE_TYPE
-{
-  SCSI_DEVICE_HDD,
-  SCSI_DEVICE_OPTICAL,
-};
 
-#define CDROM_RAW_SECTORSIZE    2352
-#define CDROM_COMMON_SECTORSIZE 2048
 
-struct SCSI_INQUIRY_DATA
+typedef struct _SCSI_INQUIRY_DATA
 {
   union
   {
@@ -302,22 +335,37 @@ struct SCSI_INQUIRY_DATA
   // raw bytes
   byte raw[64];
   };
-};
+} SCSI_INQUIRY_DATA;
 
 // HDD image
 typedef __attribute__((aligned(4))) struct _SCSI_DEVICE
 {
-	FsFile        *m_file;                 // File object
-	uint64_t      m_fileSize;             // File size
-	uint16_t      m_blocksize;            // SCSI BLOCK size
-  uint8_t       m_type;                 // SCSI device type
-  uint32_t      m_blockcount;           // blockcount
-  bool          m_raw;                  // Raw disk
-  SCSI_INQUIRY_DATA *inquiry_block;      // SCSI information
+  FsFile        m_file;                   // File object
+  uint64_t      m_fileSize;               // File size
+  uint16_t      m_blocksize;              // SCSI BLOCK size
+  uint16_t      m_rawblocksize;           // OPTICAL raw sector size
+  uint8_t       m_type;                   // SCSI device type
+  uint32_t      m_blockcount;             // blockcount
+  SCSI_INQUIRY_DATA inquiry_block;        // SCSI information
   uint8_t       m_senseKey;               // Sense key
-  uint16_t      m_additional_sense_code;  // ASC/ASCQ 
-  bool          m_mode2;                  // MODE2 CDROM
+  uint16_t      m_additional_sense_code;  // ASC/ASCQ
+  uint8_t       m_sector_offset;          // optical sector offset for missing sync header
+  uint8_t       flags;                    // various device flags
 } SCSI_DEVICE;
 
+static byte cdb_len_lookup[] = {
+  6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,
+  10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,
+  10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,
+  10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,
+  10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,
+  10,10,10,10,10,10,10,10,10,10,10,10,10,16,16,16,16,16,16,16,16,
+  16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,16,
+  16,16,16,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,
+  12,12,12,12,12,12,12,12,12,12,12,12,12,12,10,10,10,10,10,10,10,
+  10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,
+  10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,
+  10,10,10,10,10,10,10,10,10,10,10,10,10,10
+};
 
 #endif
