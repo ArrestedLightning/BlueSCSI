@@ -8,7 +8,7 @@
 #define MAX_SCSIID  7          // Maximum number of supported SCSI-IDs (The minimum is 0)
 #define MAX_SCSILUN 8          // Maximum number of LUNs supported     (The minimum is 0)
 #define NUM_SCSIID  MAX_SCSIID // Number of enabled SCSI IDs
-#define NUM_SCSILUN 1          // Number of enabled LUNs
+#define NUM_SCSILUN 1//1          // Number of enabled LUNs
 #define READ_PARITY_CHECK 0    // Perform read parity check (unverified)
 #define DEFAULT_SCSI_ID 1
 #define DEFAULT_SCSI_LUN 0
