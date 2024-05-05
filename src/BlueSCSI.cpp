@@ -52,7 +52,7 @@
 #define MAJOR_VERSION 1
 #define MINOR_VERSION 3
 
-#define VERSION TOSTRING(MAJOR_VERSION) "." TOSTRING(MINOR_VERSION) "d-SNAPSHOT-20220907-CDROM"
+#define VERSION TOSTRING(MAJOR_VERSION) "." TOSTRING(MINOR_VERSION) "d-SNAPSHOT-20220907+CDROM+LUN"
 #define LOG_FILENAME "LOG.txt"
 
 #include "BlueSCSI.h"
@@ -221,9 +221,9 @@ bool usb_write7(const uint8_t *writeBuff, uint32_t startSector, uint16_t numSect
 }
 
 static const MassStorageReader usb_read_functions[USB_MASS_MAX_DRIVES] = {usb_read0, usb_read1, usb_read2, usb_read3,
-                                                                          usb_read4, usb_read5, usb_read6, usb_read7};
+                                                                          usb_read4};//, usb_read5, usb_read6, usb_read7};
 static const MassStorageWriter usb_write_functions[USB_MASS_MAX_DRIVES] = {usb_write0, usb_write1, usb_write2, usb_write3,
-                                                                           usb_write4, usb_write5, usb_write6, usb_write7};
+                                                                           usb_write4};//, usb_write5, usb_write6, usb_write7};
 
 static void configure_usb_descriptors(void) {
   USBComposite.setSerialString(getDeviceIDString());
@@ -706,6 +706,7 @@ void setup()
   }
 
   LED_OFF();
+  LOG_FILE.println("Finished looking for images");
 
   #ifdef USB_PASSTHROUGH
   if (usb_enabled) {
@@ -727,6 +728,7 @@ void setup()
         delay(10);
       }
     }
+    LOG_FILE.println("Finished USB_PASSTHROUGH");
   }
   #endif
 
@@ -734,6 +736,7 @@ void setup()
     finalizeDevices();
     //Occurs when the RST pin state changes from HIGH to LOW
     attachInterrupt(RST, onBusReset, FALLING);
+    LOG_FILE.println("Finished finalizeDevices");
   }
 }
 
@@ -750,6 +753,7 @@ void findDriveImages(FsFile root) {
     FsFile file_test = root.openNextFile(O_RDONLY);
     char name[MAX_FILE_PATH+1];
     file_test.getName(name, sizeof(name));
+    LOG_FILE.print("Handling file: "); LOG_FILE.println(name);
 
     // Skip directories and already open files.
     if(file_test.isDir() || strncmp(name, LOG_FILENAME, (sizeof(LOG_FILENAME) - 1)) == 0) {
@@ -759,16 +763,18 @@ void findDriveImages(FsFile root) {
     // If error there is no next file to open.
     if(file_test.getError() > 0) {
       file_test.close();
+      LOG_FILE.println("No more files.");
       break;
+    }
+
+    file_test.close();
+
+    if(tolower(name[1]) != 'd') { // Not HD or CD
+      continue;
     }
 
     // Valid file, open for reading/writing.
     SCSI_DEVICE_TYPE device_type;
-    if(tolower(name[1]) != 'd') {
-      file.close();
-      continue;
-    }
-
     switch (tolower(name[0])) {
     case 'h':
       device_type = SCSI_DEVICE_HDD;
@@ -789,6 +795,9 @@ void findDriveImages(FsFile root) {
       int lun = DEFAULT_SCSI_LUN;
       int blk = HDD_BLOCK_SIZE;
 
+      if (device_type == SCSI_DEVICE_OPTICAL)
+        blk = OPTICAL_BLOCK_SIZE;
+
       LOG_FILE.print(" "); LOG_FILE.println(name);
 
       // Positionally read in and coerce the chars to integers.
@@ -798,7 +807,7 @@ void findDriveImages(FsFile root) {
         int tmp_id = CHAR_TO_INT(name[HDIMG_ID_POS]);
 
         // If valid id, set it, else use default
-        if(tmp_id > -1 && tmp_id <= MAX_SCSIID) {
+        if(tmp_id > -1 && tmp_id < NUM_SCSIID) {
           id = tmp_id;
         } else {
           LOG_FILE.print(" WARNING: Bad SCSI ID in filename, using ID ");
@@ -853,6 +862,7 @@ void findDriveImages(FsFile root) {
       dev = &scsi_device_list[id][lun];
       dev->m_type = device_type;
       image_ready = hddimageOpen(dev, &file, id, lun, blk);
+
       if(image_ready) { // Marked as a responsive ID
         scsi_id_mask |= 1<<id;
 
@@ -882,6 +892,8 @@ void findDriveImages(FsFile root) {
       }
       LOG_FILE.println();
     }
+    LOG_FILE.print("DONE Handling file: "); LOG_FILE.println(name);
+
     LOG_FILE.sync();
   }
   // cd .. before going back.
