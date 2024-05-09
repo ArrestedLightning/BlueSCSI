@@ -42,17 +42,18 @@
 #define STRINGIFY(x) #x
 #define TOSTRING(x) STRINGIFY(x)
 
-#define DEBUG            0      // 0:No debug information output
+#define DEBUG            2      // 0:No debug information output
                                 // 1: Debug information output to USB Serial
                                 // 2: Debug information output to LOG.txt (slow)
 
-#define PRODUCT_NAME "DIETSCSI"
-#define PRODUCT_URL "https://github.com/ArrestedLightning/dietSCSI"
+#define MANUFACTURER_NAME "Arrested Lightning"
+#define PRODUCT_NAME "dietSCSI"
+#define PRODUCT_URL "https://bitly.cx/zBpX"
 // Log File
 #define MAJOR_VERSION 1
 #define MINOR_VERSION 3
 
-#define VERSION TOSTRING(MAJOR_VERSION) "." TOSTRING(MINOR_VERSION) "d-SNAPSHOT-20220907+CDROM+LUN"
+#define VERSION TOSTRING(MAJOR_VERSION) "." TOSTRING(MINOR_VERSION) "+CDROM+LUN"
 #define LOG_FILENAME "LOG.txt"
 
 #include "BlueSCSI.h"
@@ -72,12 +73,14 @@
 // SDFAT
 SdFs SD;
 FsFile LOG_FILE;
+
 #ifdef USB_PASSTHROUGH
 USBMassStorage ms;
 uint8_t num_usb_volumes = 0;
 FsFile *usb_files[USB_MASS_MAX_DRIVES];
 bool usb_enabled = true;
 #endif
+
 bool usb_active = false;
 
 volatile bool m_isBusReset = false;   // Bus reset
@@ -87,7 +90,9 @@ byte          scsi_id_mask;              // Mask list of responding SCSI IDs
 byte          m_buf[MAX_BLOCKSIZE];      // General purpose buffer
 byte          m_scsi_buf[SCSI_BUF_SIZE]; // Buffer for SCSI READ/WRITE Buffer
 
-SCSI_DEVICE scsi_device_list[NUM_SCSIID][NUM_SCSILUN]; // Maximum number
+short int num_scsi_devices = 0;
+SCSI_DEVICE scsi_device_list_real[MAX_SCSI_DEVICES]; // STM32F103C8 only has 20KB of ram.
+SCSI_DEVICE *scsi_device_list[NUM_SCSIID][NUM_SCSILUN]; // Pointers to real devices above
 SCSI_INQUIRY_DATA default_hdd, default_optical;
 
 // Enables SCSI IDs to be representing as LUNs on SCSI ID 0
@@ -156,79 +161,176 @@ bool usb_read(uint8_t *readBuff, uint32_t startSector, uint16_t numSectors, uint
   return success;
 }
 
-bool usb_read0(uint8_t *readBuff, uint32_t startSector, uint16_t numSectors) {
-  return usb_read(readBuff, startSector, numSectors, 0);
-}
+#define READ_FUNC(X) bool usb_read##X(uint8_t *readBuff, uint32_t startSector, uint16_t numSectors) { return usb_read(readBuff, startSector, numSectors, X); }
+#define WRITE_FUNC(X) bool usb_write##X(const uint8_t *writeBuff, uint32_t startSector, uint16_t numSectors) { return usb_write(writeBuff, startSector, numSectors, X); }
 
-bool usb_write0(const uint8_t *writeBuff, uint32_t startSector, uint16_t numSectors) {
-  return usb_write(writeBuff, startSector, numSectors, 0);
-}
+#if USB_MASS_MAX_DRIVES > 0
+READ_FUNC(0)
+WRITE_FUNC(0)
+#define READ0 usb_read0
+#define WRITE0 usb_write0
+#else
+#define READ0
+#define WRITE0
+#endif
 
-bool usb_read1(uint8_t *readBuff, uint32_t startSector, uint16_t numSectors) {
-  return usb_read(readBuff, startSector, numSectors, 1);
-}
+#if USB_MASS_MAX_DRIVES > 1
+READ_FUNC(1)
+WRITE_FUNC(1)
+#define READ1 ,usb_read1
+#define WRITE1 ,usb_write1
+#else
+#define READ1
+#define WRITE1
+#endif
 
-bool usb_write1(const uint8_t *writeBuff, uint32_t startSector, uint16_t numSectors) {
-  return usb_write(writeBuff, startSector, numSectors, 1);
-}
+#if USB_MASS_MAX_DRIVES > 2
+READ_FUNC(2)
+WRITE_FUNC(2)
+#define READ2 ,usb_read2
+#define WRITE2 ,usb_write2
+#else
+#define READ2
+#define WRITE2
+#endif
 
-bool usb_read2(uint8_t *readBuff, uint32_t startSector, uint16_t numSectors) {
-  return usb_read(readBuff, startSector, numSectors, 2);
-}
+#if USB_MASS_MAX_DRIVES > 3
+READ_FUNC(3)
+WRITE_FUNC(3)
+#define READ3 ,usb_read3
+#define WRITE3 ,usb_write3
+#else
+#define READ3
+#define WRITE3
+#endif
 
-bool usb_write2(const uint8_t *writeBuff, uint32_t startSector, uint16_t numSectors) {
-  return usb_write(writeBuff, startSector, numSectors, 2);
-}
+#if USB_MASS_MAX_DRIVES > 4
+READ_FUNC(4)
+WRITE_FUNC(4)
+#define READ4 ,usb_read4
+#define WRITE4 ,usb_write4
+#else
+#define READ4
+#define WRITE4
+#endif
 
-bool usb_read3(uint8_t *readBuff, uint32_t startSector, uint16_t numSectors) {
-  return usb_read(readBuff, startSector, numSectors, 3);
-}
+#if USB_MASS_MAX_DRIVES > 5
+READ_FUNC(5)
+WRITE_FUNC(5)
+#define READ5 ,usb_read5
+#define WRITE5 ,usb_write5
+#else
+#define READ5
+#define WRITE5
+#endif
 
-bool usb_write3(const uint8_t *writeBuff, uint32_t startSector, uint16_t numSectors) {
-  return usb_write(writeBuff, startSector, numSectors, 3);
-}
+#if USB_MASS_MAX_DRIVES > 6
+READ_FUNC(6)
+WRITE_FUNC(6)
+#define READ6 ,usb_read6
+#define WRITE6 ,usb_write6
+#else
+#define READ6
+#define WRITE6
+#endif
 
-bool usb_read4(uint8_t *readBuff, uint32_t startSector, uint16_t numSectors) {
-  return usb_read(readBuff, startSector, numSectors, 4);
-}
+#if USB_MASS_MAX_DRIVES > 7
+READ_FUNC(7)
+WRITE_FUNC(7)
+#define READ7 ,usb_read7
+#define WRITE7 ,usb_write7
+#else
+#define READ7
+#define WRITE7
+#endif
 
-bool usb_write4(const uint8_t *writeBuff, uint32_t startSector, uint16_t numSectors) {
-  return usb_write(writeBuff, startSector, numSectors, 4);
-}
+#if USB_MASS_MAX_DRIVES > 8
+READ_FUNC(8)
+WRITE_FUNC(8)
+#define READ8 ,usb_read8
+#define WRITE8 ,usb_write8
+#else
+#define READ8
+#define WRITE8
+#endif
 
-bool usb_read5(uint8_t *readBuff, uint32_t startSector, uint16_t numSectors) {
-  return usb_read(readBuff, startSector, numSectors, 5);
-}
+#if USB_MASS_MAX_DRIVES > 9
+READ_FUNC(9)
+WRITE_FUNC(9)
+#define READ9 ,usb_read9
+#define WRITE9 ,usb_write9
+#else
+#define READ9
+#define WRITE9
+#endif
 
-bool usb_write5(const uint8_t *writeBuff, uint32_t startSector, uint16_t numSectors) {
-  return usb_write(writeBuff, startSector, numSectors, 5);
-}
+#if USB_MASS_MAX_DRIVES > 10
+READ_FUNC(10)
+WRITE_FUNC(10)
+#define READ10 ,usb_read10
+#define WRITE10 ,usb_write10
+#else
+#define READ10
+#define WRITE10
+#endif
 
-bool usb_read6(uint8_t *readBuff, uint32_t startSector, uint16_t numSectors) {
-  return usb_read(readBuff, startSector, numSectors, 6);
-}
+#if USB_MASS_MAX_DRIVES > 11
+READ_FUNC(11)
+WRITE_FUNC(11)
+#define READ11 ,usb_read11
+#define WRITE11 ,usb_write11
+#else
+#define READ11
+#define WRITE11
+#endif
 
-bool usb_write6(const uint8_t *writeBuff, uint32_t startSector, uint16_t numSectors) {
-  return usb_write(writeBuff, startSector, numSectors, 6);
-}
+#if USB_MASS_MAX_DRIVES > 12
+READ_FUNC(12)
+WRITE_FUNC(12)
+#define READ12 ,usb_read12
+#define WRITE12 ,usb_write12
+#else
+#define READ12
+#define WRITE12
+#endif
 
-bool usb_read7(uint8_t *readBuff, uint32_t startSector, uint16_t numSectors) {
-  return usb_read(readBuff, startSector, numSectors, 7);
-}
+#if USB_MASS_MAX_DRIVES > 13
+READ_FUNC(13)
+WRITE_FUNC(13)
+#define READ13 ,usb_read13
+#define WRITE13 ,usb_write13
+#else
+#define READ13
+#define WRITE13
+#endif
 
-bool usb_write7(const uint8_t *writeBuff, uint32_t startSector, uint16_t numSectors) {
-  return usb_write(writeBuff, startSector, numSectors, 7);
-}
+#if USB_MASS_MAX_DRIVES > 14
+READ_FUNC(14)
+WRITE_FUNC(14)
+#define READ14 ,usb_read14
+#define WRITE14 ,usb_write14
+#else
+#define READ14
+#define WRITE14
+#endif
 
-static const MassStorageReader usb_read_functions[USB_MASS_MAX_DRIVES] = {usb_read0, usb_read1, usb_read2, usb_read3,
-                                                                          usb_read4};//, usb_read5, usb_read6, usb_read7};
-static const MassStorageWriter usb_write_functions[USB_MASS_MAX_DRIVES] = {usb_write0, usb_write1, usb_write2, usb_write3,
-                                                                           usb_write4};//, usb_write5, usb_write6, usb_write7};
+#if USB_MASS_MAX_DRIVES > 15
+READ_FUNC(15)
+WRITE_FUNC(15)
+#define READ15 ,usb_read15
+#define WRITE15 ,usb_write15
+#else
+#define READ15
+#define WRITE15
+#endif
+
+static const MassStorageReader usb_read_functions[USB_MASS_MAX_DRIVES] = {READ0 READ1 READ2 READ3 READ4 READ5 READ6 READ7 READ8 READ9 READ10 READ11 READ12 READ13 READ14 READ15};
+static const MassStorageWriter usb_write_functions[USB_MASS_MAX_DRIVES] = {WRITE0 WRITE1 WRITE2 WRITE3 WRITE4 WRITE5 WRITE6 WRITE7 WRITE8 WRITE9 WRITE10 WRITE11 WRITE12 WRITE13 WRITE14 WRITE15};
 
 static void configure_usb_descriptors(void) {
   USBComposite.setSerialString(getDeviceIDString());
-  USBComposite.setManufacturerString("Arrested Lightning");
-  USBComposite.setProductString("dietSCSI");
+  USBComposite.setManufacturerString(MANUFACTURER_NAME);
+  USBComposite.setProductString(PRODUCT_NAME);
   USBComposite.setProductVersion((MAJOR_VERSION << 8) | MINOR_VERSION);
 }
 #endif
@@ -263,7 +365,7 @@ void readSCSIDeviceConfig(uint8_t scsi_id, SCSI_DEVICE *dev) {
   }
 
   LOG_FILE.println();
-  LOG_FILE.print("\t\tINI Overrides: ");
+  LOG_FILE.print("\t\tINI: ");
 
   // create section name from id
   section[4] = INT_TO_CHAR(scsi_id);
@@ -273,13 +375,13 @@ void readSCSIDeviceConfig(uint8_t scsi_id, SCSI_DEVICE *dev) {
     case 0:
       dev->m_type = SCSI_DEVICE_HDD;
       memcpy(iq, &default_hdd, sizeof(default_hdd));
-      LOG_FILE.print("Forced HDD");
+      LOG_FILE.print("HDD");
       break;
 
     case 2:
       dev->m_type = SCSI_DEVICE_OPTICAL;
       memcpy(iq, &default_optical, sizeof(default_optical));
-      LOG_FILE.print("Forced CDROM");
+      LOG_FILE.print("CDROM");
       break;
 
     case 99:
@@ -287,26 +389,31 @@ void readSCSIDeviceConfig(uint8_t scsi_id, SCSI_DEVICE *dev) {
       break;
 
     default:
-      LOG_FILE.print("Unsupported type override");
+      LOG_FILE.print("INI?");
   }
 
-  if(ini_gets(section, "vendor", NULL, buf, SCSI_BUF_SIZE, BLUESCSI_INI)) {
+#define VENDOR_STR "vendor"
+  if(ini_gets(section, VENDOR_STR, NULL, buf, SCSI_BUF_SIZE, BLUESCSI_INI)) {
     memcpy(iq->vendor, buf, SCSI_VENDOR_LENGTH);
-    LOG_FILE.print(" / Vendor: ");
+    LOG_FILE.print(" " VENDOR_STR ": ");
     LOG_FILE.print(buf);
   }
 
-  if(ini_gets(section, "product", NULL, buf, SCSI_BUF_SIZE, BLUESCSI_INI)) {
+#define PRODUCT_STR "product"
+  if(ini_gets(section, PRODUCT_STR, NULL, buf, SCSI_BUF_SIZE, BLUESCSI_INI)) {
     memcpy(iq->product, buf, SCSI_PRODUCT_LENGTH);
-    LOG_FILE.print(" / Product: ");
+    LOG_FILE.print(" " PRODUCT_STR ": ");
     LOG_FILE.print(buf);
   }
 
-  if(ini_gets(section, "revision", NULL, buf, SCSI_BUF_SIZE, BLUESCSI_INI)) {
+#define REVISION_STR "revision"
+  if(ini_gets(section, REVISION_STR, NULL, buf, SCSI_BUF_SIZE, BLUESCSI_INI)) {
     memcpy(iq->revision, buf, SCSI_REVISION_LENGTH);
-    LOG_FILE.print(" / Revision: ");
+    LOG_FILE.print(" " REVISION_STR ": ");
     LOG_FILE.print(buf);
   }
+
+  LOG_FILE.sync();
 }
 
 // read SD information and print to logfile
@@ -314,12 +421,12 @@ void readSDCardInfo(int success_mhz)
 {
   cid_t sd_cid;
 
-  LOG_FILE.println("SD Card Info:");
+  LOG_FILE.println("SD Card:");
   LOG_FILE.print(" SPI Speed: ");
   LOG_FILE.print(success_mhz);
   LOG_FILE.println("MHz");
   if(success_mhz == 25) {
-    LOG_FILE.println("Note: SPI running at half speed - performance will be reduced.");
+    LOG_FILE.println("Slow SPI!");
   }
   LOG_FILE.print(" Format: ");
   switch(SD.vol()->fatType()) {
@@ -327,9 +434,9 @@ void readSDCardInfo(int success_mhz)
       LOG_FILE.println("exFAT");
       break;
     default:
-      LOG_FILE.println("FAT32/16/12 - exFAT may improve performance");
+      LOG_FILE.println("FAT32/16/12. Use exFAT");
   }
-  LOG_FILE.print(" Max Filename Length: ");
+  LOG_FILE.print(" MAX_FILE_PATH: ");
   LOG_FILE.println(MAX_FILE_PATH);
 
   if(SD.card()->readCID(&sd_cid))
@@ -362,13 +469,13 @@ bool VerifyISOPVD(SCSI_DEVICE *dev, unsigned sector_size, bool mode2)
   if(mode2) seek += 8;
   bool ret = false;
 
-  dev->m_file.seekSet(seek);
-  dev->m_file.read(m_buf, 2048);
+  dev->m_file->seekSet(seek);
+  dev->m_file->read(m_buf, 2048);
 
   ret = ((m_buf[0] == 1 && !strncmp((char *)&m_buf[1], "CD001", 5) && m_buf[6] == 1) ||
         (m_buf[8] == 1 && !strncmp((char *)&m_buf[9], "CDROM", 5) && m_buf[14] == 1));
 
-  dev->m_file.rewind();
+  dev->m_file->rewind();
   return ret;
 }
 
@@ -383,19 +490,24 @@ bool hddimageOpen(SCSI_DEVICE *dev, FsFile *file,int id,int lun,int blocksize)
   dev->flags = 0;
   dev->m_blocksize = blocksize;
   dev->m_rawblocksize = blocksize;
-  dev->m_file = *file;
-  if(!dev->m_file.isOpen()) { goto failed; }
-
-  dev->m_fileSize = dev->m_file.size();
-
-  if(dev->m_fileSize < 1) {
-    LOG_FILE.println(" ERROR: 0 byte file");
+  dev->m_file = file;
+  if(!dev->m_file->isOpen()) {
+#if DEBUG > 0
+    LOG_FILE.println(" E: not open");
+#endif
     goto failed;
   }
 
-  if(!dev->m_file.isContiguous())
+  dev->m_fileSize = dev->m_file->size();
+
+  if(dev->m_fileSize < 1) {
+    LOG_FILE.println(" E: 0 file");
+    goto failed;
+  }
+
+  if(!dev->m_file->isContiguous())
   {
-    LOG_FILE.println(" WARNING: Fragmented, see https://github.com/erichelgeson/BlueSCSI/wiki/Image-File-Fragmentation");
+    LOG_FILE.println(" W: Fragmented. See https://bitly.cx/AQesm");
   }
 
   if(dev->m_type == SCSI_DEVICE_OPTICAL) {
@@ -421,7 +533,7 @@ bool hddimageOpen(SCSI_DEVICE *dev, FsFile *file,int id,int lun,int blocksize)
       // Last ditch effort
       // size must be less than 700MB
       if(dev->m_fileSize > 912579600) {
-        LOG_FILE.println(" ERROR: ISO too large!");
+        LOG_FILE.println(" E: ISO size!");
         goto failed;
       }
 
@@ -433,7 +545,7 @@ bool hddimageOpen(SCSI_DEVICE *dev, FsFile *file,int id,int lun,int blocksize)
         dev->m_rawblocksize = CDROM_COMMON_SECTORSIZE;
       } else {
         // I give up!
-        LOG_FILE.println(" ERROR: Invalid ISO!");
+        LOG_FILE.println(" E: ISO blocksize!");
         goto failed;
       }
     }
@@ -451,12 +563,15 @@ bool hddimageOpen(SCSI_DEVICE *dev, FsFile *file,int id,int lun,int blocksize)
 
   if(dev->m_type == SCSI_DEVICE_OPTICAL) {
     LOG_FILE.print(" MODE2: ");LOG_FILE.print(IS_MODE2(dev->flags));
-    LOG_FILE.print(" BlockSize: ");LOG_FILE.println(IS_RAW(dev->flags));
+    LOG_FILE.print(" Raw: ");LOG_FILE.println(IS_RAW(dev->flags));
+    LOG_FILE.print(" Blocksize: ");LOG_FILE.println(dev->m_rawblocksize);
   }
+  LOG_FILE.sync();
   return true; // File opened
 
 failed:
-  dev->m_file.close();
+  LOG_FILE.sync();
+  dev->m_file->close();
   dev->m_fileSize = dev->m_blocksize = 0; // no file
   //delete dev->m_file;
   //dev->m_file = NULL;
@@ -469,6 +584,7 @@ failed:
  */
 void setup()
 {
+  bzero(scsi_device_list, sizeof(scsi_device_list));
   // PA15 / PB3 / PB4 Cannot be used
   // JTAG Because it is used for debugging.
   enableDebugPorts();
@@ -640,7 +756,7 @@ void setup()
 
   if(!sd_ready) {
 #if DEBUG > 0
-    Serial.println("SD Init failed!");
+    Serial.println("E: SD Init!");
 #endif
     flashError(ERROR_NO_SDCARD);
   }
@@ -651,15 +767,15 @@ void setup()
   // HD image file open
   scsi_id_mask = 0x00;
 
-  if(SD.exists("scsi-config.txt")) {
-    LOG_FILE.print("scsi-config.txt is deprecated, use ");
-    LOG_FILE.println(BLUESCSI_INI);
+#define OLD_CONFIG "scsi-config.txt"
+  if(SD.exists(OLD_CONFIG)) {
+    LOG_FILE.println(OLD_CONFIG " ignored. Use " BLUESCSI_INI);
   }
 
   if(ini_getl("SCSI", "MapLunsToIDs", 0, BLUESCSI_INI))
   {
     ids_as_luns = true;
-    LOG_FILE.println("Treating IDs as LUNs on ID0");
+    LOG_FILE.println("IDs are LUNs on ID0");
   }
 
   // Iterate over the root path in the SD card looking for candidate image files.
@@ -669,6 +785,9 @@ void setup()
   //allow disabling USB by placing a file named "nousb" in the SD card
   //could be useful if the USB startup delay causes compatibility problems
   if (root.open("nousb")) {
+#if DEBUG > 0
+    LOG_FILE.println("nousb");
+#endif
     usb_enabled = false;
   }
   root.close();
@@ -677,7 +796,7 @@ void setup()
   char image_set_dir_name[] = "/ImageSetX/";
   image_set_dir_name[9] = INT_TO_CHAR(image_file_set);
   root.open(image_set_dir_name);
-  LOG_FILE.print("Looking for images in: ");
+  LOG_FILE.print("Searching: ");
   if (root.isDirectory()) {
     LOG_FILE.println(image_set_dir_name);
   } else {
@@ -693,7 +812,7 @@ void setup()
   FsFile images_all_dir;
   images_all_dir.open("/ImageSetAll/");
   if (images_all_dir.isDirectory()) {
-    LOG_FILE.println("Looking for images in: /ImageSetAll/");
+    LOG_FILE.println("Searching: /ImageSetAll/");
     LOG_FILE.sync();
     findDriveImages(images_all_dir);
   }
@@ -701,48 +820,97 @@ void setup()
 
   // Error if there are 0 image files
   if(scsi_id_mask==0) {
-    LOG_FILE.println("ERROR: No valid images found!");
+    LOG_FILE.println("E: No images!");
+    // LOG_FILE.sync();
     flashError(ERROR_FALSE_INIT);
   }
 
   LED_OFF();
-  LOG_FILE.println("Finished looking for images");
+#if DEBUG > 0
+  LOG_FILE.println("End images");
+  LOG_FILE.sync();
+#endif
+
+  finalizeDevices();
 
   #ifdef USB_PASSTHROUGH
   if (usb_enabled) {
+#if DEBUG > 0
+    LOG_FILE.println("Start USB_PASSTHROUGH");
+    LOG_FILE.sync();
+#endif
     configure_usb_descriptors();
     if (num_usb_volumes > 0) {
       ms.clearDrives();
       for (int i = 0; i < num_usb_volumes;  i += 1) {
+#if DEBUG > 0
+        char name[MAX_FILE_PATH+1];
+        usb_files[i]->getName(name, sizeof(name));
+        LOG_FILE.print("USB_PASSTHROUGH file "); LOG_FILE.println(name);
+#endif
+
         ms.setDriveData(i, usb_files[i]->size() / SCSI_BLOCK_SIZE, usb_read_functions[i], usb_write_functions[i]);
       }
-      ms.registerComponent();
-      USBComposite.begin();
 
-      //allow 1 second for the PC to enumerate the USB device, otherwise switch to SCSI mode
-      for (int i = 0; i < 100; i += 1) {
+      if (!ms.registerComponent()) {
+#if DEBUG > 0
+        LOG_FILE.println("E: registerComponent");
+#endif
+      }
+
+      if (!USBComposite.begin()) {
+#if DEBUG > 0
+        LOG_FILE.println("E: USBComposite.begin");
+#endif
+      }
+
+      //allow 2 seconds for the PC to enumerate the USB device, otherwise switch to SCSI mode
+      #define USB_WAIT_S 3
+      #define USB_WAIT_DELAY_MS 100
+      for (int i = 0; i < USB_WAIT_S*1000/USB_WAIT_DELAY_MS; i += 1) {
+#if DEBUG > 0
+        LED_ON();
+        LOG_FILE.print(".");
+        delay(USB_WAIT_DELAY_MS/2);
+#endif
         if (USBComposite) {
           usb_active = true;
           break;
         }
-        delay(10);
+        LED_OFF();
+        delay(USB_WAIT_DELAY_MS/2);
       }
+
+#if DEBUG > 0
+      LOG_FILE.print("usb_active="); LOG_FILE.println(usb_active);
+#endif
+    } else {
+#if DEBUG > 0
+      LOG_FILE.println("W: no usb_volumes");
+#endif
     }
-    LOG_FILE.println("Finished USB_PASSTHROUGH");
+#if DEBUG > 0
+    LOG_FILE.println("End USB_PASSTHROUGH");
+    LOG_FILE.sync();
+#endif
   }
   #endif
 
   if (!usb_active) {
-    finalizeDevices();
     //Occurs when the RST pin state changes from HIGH to LOW
     attachInterrupt(RST, onBusReset, FALLING);
-    LOG_FILE.println("Finished finalizeDevices");
+#if DEBUG > 0
+    LOG_FILE.println("no usb_active");
+    LOG_FILE.sync();
+#endif
   }
+
+  LOG_FILE.sync();
 }
 
 void findDriveImages(FsFile root) {
   bool image_ready;
-  FsFile file;
+  FsFile *file;
   char path_name[MAX_FILE_PATH+1];
   root.getName(path_name, sizeof(path_name));
   SD.chdir(path_name);
@@ -753,7 +921,10 @@ void findDriveImages(FsFile root) {
     FsFile file_test = root.openNextFile(O_RDONLY);
     char name[MAX_FILE_PATH+1];
     file_test.getName(name, sizeof(name));
-    LOG_FILE.print("Handling file: "); LOG_FILE.println(name);
+#if DEBUG > 0
+    LOG_FILE.print("File: "); LOG_FILE.println(name);
+    LOG_FILE.sync();
+#endif
 
     // Skip directories and already open files.
     if(file_test.isDir() || strncmp(name, LOG_FILENAME, (sizeof(LOG_FILENAME) - 1)) == 0) {
@@ -763,8 +934,16 @@ void findDriveImages(FsFile root) {
     // If error there is no next file to open.
     if(file_test.getError() > 0) {
       file_test.close();
-      LOG_FILE.println("No more files.");
+      LOG_FILE.println("End files");
+      LOG_FILE.sync();
       break;
+    }
+
+    if (num_scsi_devices >= MAX_SCSI_DEVICES) {
+      LOG_FILE.print("MAX_SCSI_DEVICES. Skipping: "); LOG_FILE.println(name);
+      LOG_FILE.sync();
+      file_test.close();
+      continue;
     }
 
     file_test.close();
@@ -778,18 +957,17 @@ void findDriveImages(FsFile root) {
     switch (tolower(name[0])) {
     case 'h':
       device_type = SCSI_DEVICE_HDD;
-      file = SD.open(name, O_RDWR);
+      file = new FsFile(SD.open(name, O_RDWR));
       break;
     case 'c':
       device_type = SCSI_DEVICE_OPTICAL;
-      file = SD.open(name, O_RDONLY);
+      file = new FsFile(SD.open(name, O_RDONLY));
       break;
     default:
-      file.close();
       continue;
     }
 
-    if(file && file.isFile()) {
+    if(file && file->isFile()) {
       // Defaults for Hard Disks
       int id  = DEFAULT_SCSI_ID; // 0 and 3 are common in Macs for physical HD and CD, so avoid them.
       int lun = DEFAULT_SCSI_LUN;
@@ -799,6 +977,7 @@ void findDriveImages(FsFile root) {
         blk = OPTICAL_BLOCK_SIZE;
 
       LOG_FILE.print(" "); LOG_FILE.println(name);
+      LOG_FILE.sync();
 
       // Positionally read in and coerce the chars to integers.
       // We only require the minimum and read in the next if provided.
@@ -810,8 +989,9 @@ void findDriveImages(FsFile root) {
         if(tmp_id > -1 && tmp_id < NUM_SCSIID) {
           id = tmp_id;
         } else {
-          LOG_FILE.print(" WARNING: Bad SCSI ID in filename, using ID ");
+          LOG_FILE.print(" W: Bad SCSI ID, using ");
           LOG_FILE.println(id);
+          LOG_FILE.sync();
         }
       }
 
@@ -822,8 +1002,9 @@ void findDriveImages(FsFile root) {
         if(tmp_lun > -1 && tmp_lun <= NUM_SCSILUN) {
           lun = tmp_lun;
         } else {
-          LOG_FILE.print(" WARNING: Bad SCSI LUN in filename, using LUN ");
+          LOG_FILE.print(" W: Bad SCSI LUN, using ");
           LOG_FILE.println(lun);
+          LOG_FILE.sync();
         }
       }
 
@@ -853,15 +1034,17 @@ void findDriveImages(FsFile root) {
           LOG_FILE.print("CDROM");
           break;
         default:
-          LOG_FILE.print("UNKNOWN");
+          LOG_FILE.print("?");
       }
       LOG_FILE.print(" ID "); LOG_FILE.print(id);
       LOG_FILE.print(" LUN "); LOG_FILE.print(lun);
-      LOG_FILE.print(" Blocksize "); LOG_FILE.print(blk); LOG_FILE.println("k");
+      LOG_FILE.print(" Blocksize "); LOG_FILE.println(blk);
+      LOG_FILE.sync();
 
-      dev = &scsi_device_list[id][lun];
+      scsi_device_list[id][lun] = &scsi_device_list_real[num_scsi_devices++];
+      dev = scsi_device_list[id][lun];
       dev->m_type = device_type;
-      image_ready = hddimageOpen(dev, &file, id, lun, blk);
+      image_ready = hddimageOpen(dev, file, id, lun, blk);
 
       if(image_ready) { // Marked as a responsive ID
         scsi_id_mask |= 1<<id;
@@ -875,12 +1058,24 @@ void findDriveImages(FsFile root) {
             #ifdef USB_PASSTHROUGH
             //add active hard disk images to the USB passthrough list
             if (num_usb_volumes < USB_MASS_MAX_DRIVES) {
+#if DEBUG > 0
+              LOG_FILE.print("USB_PASSTHROUGH ID "); LOG_FILE.print(id); LOG_FILE.print(" LUN "); LOG_FILE.println(lun);
+              LOG_FILE.sync();
+#endif
               //only allow passthrough on 512 byte block images for now
               if (blk == SCSI_BLOCK_SIZE) {
-                usb_files[num_usb_volumes] = &file;
+                usb_files[num_usb_volumes] = file;
                 num_usb_volumes += 1;
               }
+            } else {
+#if DEBUG > 0
+              LOG_FILE.print("W: USB_MASS_MAX_DRIVES. Skipping ID "); LOG_FILE.print(id); LOG_FILE.print(" LUN "); LOG_FILE.println(lun);
+              LOG_FILE.sync();
+#endif
             }
+            #else
+            LOG_FILE.println("USB_PASSTHROUGH disabled");
+            LOG_FILE.sync();
             #endif
             break;
 
@@ -892,8 +1087,9 @@ void findDriveImages(FsFile root) {
       }
       LOG_FILE.println();
     }
-    LOG_FILE.print("DONE Handling file: "); LOG_FILE.println(name);
-
+#if DEBUG > 0
+    LOG_FILE.print("DONE file: "); LOG_FILE.println(name);
+#endif
     LOG_FILE.sync();
   }
   // cd .. before going back.
@@ -905,17 +1101,19 @@ void findDriveImages(FsFile root) {
  */
 void initFileLog() {
   LOG_FILE = SD.open(LOG_FILENAME, O_WRONLY | O_CREAT | O_TRUNC);
-  LOG_FILE.println(PRODUCT_NAME " <-> SD - " PRODUCT_URL);
-  LOG_FILE.print("VERSION: ");
+  LOG_FILE.println(PRODUCT_NAME ": " PRODUCT_URL);
+  LOG_FILE.print("V: ");
   LOG_FILE.print(VERSION);
   LOG_FILE.println(BUILD_TAGS);
   LOG_FILE.print("DEBUG:");
   LOG_FILE.print(DEBUG);
+#if DEBUG
   LOG_FILE.print(" SDFAT_FILE_TYPE:");
   LOG_FILE.println(SDFAT_FILE_TYPE);
   LOG_FILE.print("SdFat version: ");
   LOG_FILE.println(SD_FAT_VERSION_STR);
   LOG_FILE.print("Sd Format: ");
+#endif
   switch(SD.vol()->fatType()) {
     case FAT_TYPE_EXFAT:
     LOG_FILE.println("exFAT");
@@ -925,12 +1123,12 @@ void initFileLog() {
     case FAT_TYPE_FAT16:
     LOG_FILE.print("FAT16");
     default:
-    LOG_FILE.println(" - Consider formatting the SD Card with exFAT for improved performance.");
+    LOG_FILE.println("W: Use exFAT!");
   }
 
-  LOG_FILE.print("SdFat Max FileName Length: ");
+  LOG_FILE.print("Max File name: ");
   LOG_FILE.println(MAX_FILE_PATH);
-  LOG_FILE.println("Initialized SD Card - lets go!");
+  LOG_FILE.println("End SD Card");
   LOG_FILE.sync();
 }
 
@@ -950,11 +1148,11 @@ void finalizeDevices() {
       LOG_FILE.print("\t");
       LOG_FILE.print(lun);
       LOG_FILE.print("\t");
-      SCSI_DEVICE *dev = &scsi_device_list[id][lun];
-      if(dev->m_file)
+      SCSI_DEVICE *dev = scsi_device_list[id][lun];
+      if(dev && dev->m_file)
       {
         char name[MAX_FILE_PATH+1];
-        dev->m_file.getName(name, sizeof(name));
+        dev->m_file->getName(name, sizeof(name));
         LOG_FILE.print(name);
         readSCSIDeviceConfig(id, dev);
       }
@@ -964,7 +1162,7 @@ void finalizeDevices() {
       LOG_FILE.println();
     }
   }
-  LOG_FILE.println("Finished configuration - Starting BlueSCSI");
+  LOG_FILE.println("End config");
   LOG_FILE.sync();
   #if DEBUG < 2
   //LOG_FILE.close();
@@ -1215,7 +1413,7 @@ void writeDataPhaseSD(SCSI_DEVICE *dev, uint32_t adds, uint32_t len)
   SCSI_PHASE_CHANGE(SCSI_PHASE_DATAIN);
   //Bus settle delay 400ns, file.seek() measured at over 1000ns.
   uint64_t pos = (uint64_t)adds * dev->m_rawblocksize;
-  dev->m_file.seekSet(pos);
+  dev->m_file->seekSet(pos);
 #ifdef XCVR
   TRANSCEIVER_IO_SET(vTR_DBP,TR_OUTPUT)
 #endif
@@ -1224,7 +1422,7 @@ void writeDataPhaseSD(SCSI_DEVICE *dev, uint32_t adds, uint32_t len)
   for(uint32_t i = 0; i < len; i++) {
       // Asynchronous reads will make it faster ...
     m_resetJmp = false;
-    dev->m_file.read(m_buf, dev->m_rawblocksize);
+    dev->m_file->read(m_buf, dev->m_rawblocksize);
     enableResetJmp();
 
     writeDataLoop(dev->m_blocksize, &m_buf[dev->m_sector_offset]);
@@ -1296,18 +1494,18 @@ void readDataPhaseSD(SCSI_DEVICE *dev, uint32_t adds, uint32_t len)
   //Bus settle delay 400ns, file.seek() measured at over 1000ns.
 
   uint64_t pos = (uint64_t)adds * dev->m_blocksize;
-  dev->m_file.seekSet(pos);
+  dev->m_file->seekSet(pos);
   for(uint32_t i = 0; i < len; i++) {
     m_resetJmp = true;
     readDataLoop(dev->m_blocksize, m_buf);
     m_resetJmp = false;
-    dev->m_file.write(m_buf, dev->m_blocksize);
+    dev->m_file->write(m_buf, dev->m_blocksize);
     // If a reset happened while writing, break and let the flush happen before it is handled.
     if (m_isBusReset) {
       break;
     }
   }
-  dev->m_file.flush();
+  dev->m_file->flush();
   enableResetJmp();
 }
 
@@ -1322,7 +1520,7 @@ void verifyDataPhaseSD(SCSI_DEVICE *dev, uint32_t adds, uint32_t len)
   //Bus settle delay 400ns, file.seek() measured at over 1000ns.
 
   uint64_t pos = (uint64_t)adds * dev->m_blocksize;
-  dev->m_file.seekSet(pos);
+  dev->m_file->seekSet(pos);
   for(uint32_t i = 0; i < len; i++) {
     readDataLoop(dev->m_blocksize, m_buf);
     // This has just gone through the transfer to make things work, a compare would go here.
@@ -1397,7 +1595,7 @@ void scsi_loop()
 
   m_isBusReset = false;
   if (setjmp(m_resetJmpBuf) == 1) {
-    LOGN("Reset, going to BusFree");
+    LOGN("BusFree");
     goto BusFree;
   }
   enableResetJmp();
@@ -1498,7 +1696,7 @@ void scsi_loop()
       // devices still be used
 
       LOG(" MSTE MODE ID:"); LOG(m_id); LOG(" LUN:"); LOG(m_lun);
-      if(scsi_device_list[m_lun][0].m_fileSize)
+      if(scsi_device_list[m_lun][0] && (*scsi_device_list[m_lun][0]).m_fileSize)
       {
         m_id = m_lun;
         m_lun = 0;
@@ -1519,11 +1717,11 @@ void scsi_loop()
     m_sts = SCSI_STATUS_GOOD;
 
     // REQUEST SENSE and INQUIRY are handled different with invalid LUNs
-    if(cmd[0] == SCSI_INQUIRY)
+    if(cmd[0] == SCSI_INQUIRY && scsi_device_list[m_id][0])
     {
       // Special INQUIRY handling for invalid LUNs
       LOGN("onInquiry - InvalidLUN");
-      dev = &(scsi_device_list[m_id][0]);
+      dev = scsi_device_list[m_id][0];
 
       byte temp = dev->inquiry_block.raw[0];
 
@@ -1559,8 +1757,8 @@ void scsi_loop()
     goto Status;
   }
 
-  dev = &(scsi_device_list[m_id][m_lun]);
-  if(!dev->m_file.isOpen())
+  dev = scsi_device_list[m_id][m_lun];
+  if(dev && !dev->m_file->isOpen())
   {
     dev->m_senseKey = SCSI_SENSE_ILLEGAL_REQUEST;
     dev->m_additional_sense_code = SCSI_ASC_LOGICAL_UNIT_NOT_SUPPORTED;
@@ -1720,7 +1918,7 @@ static byte onRead10(SCSI_DEVICE *dev, const byte *cdb)
   unsigned adds = ((uint32_t)cdb[2] << 24) | ((uint32_t)cdb[3] << 16) | ((uint32_t)cdb[4] << 8) | cdb[5];
   unsigned len = ((uint32_t)cdb[7] << 8) | cdb[8];
 
-  LOG (" Read10 ");
+  LOG(" Read10 ");
   LOG("A:");
   LOGHEX(adds);
   LOG(":");

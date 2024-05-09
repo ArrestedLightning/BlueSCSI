@@ -5,14 +5,15 @@
 #include <SdFat.h>
 
 // SCSI config
-#define MAX_SCSIID  7          // Maximum number of supported SCSI-IDs (The minimum is 0)
-#define MAX_SCSILUN 8          // Maximum number of LUNs supported     (The minimum is 0)
-#define NUM_SCSIID  4//MAX_SCSIID // Number of enabled SCSI IDs
-#define NUM_SCSILUN MAX_SCSILUN//1          // Number of enabled LUNs
-#define READ_PARITY_CHECK 0    // Perform read parity check (unverified)
+#define MAX_SCSI_DEVICES 21
+#define MAX_SCSIID  7           // Max SCSI device IDs
+#define MAX_SCSILUN 8           // Max LUN IDs
+#define NUM_SCSIID  MAX_SCSIID  // Number of enabled SCSI IDs
+#define NUM_SCSILUN MAX_SCSILUN // Number of enabled LUNs
+#define READ_PARITY_CHECK 0     // Perform read parity check (unverified)
 #define DEFAULT_SCSI_ID 1
 #define DEFAULT_SCSI_LUN 0
-#define SCSI_BUF_SIZE 512      // Size of the SCSI Buffer
+#define SCSI_BUF_SIZE 512       // Size of the SCSI Buffer
 #define HDD_BLOCK_SIZE 512
 #define OPTICAL_BLOCK_SIZE 2048
 #define BLUESCSI_INI "bluescsi.ini"
@@ -340,7 +341,7 @@ typedef struct _SCSI_INQUIRY_DATA
 // HDD image
 typedef __attribute__((aligned(4))) struct _SCSI_DEVICE
 {
-  FsFile        m_file;                   // File object
+  FsFile        *m_file;                   // File object pointer
   uint64_t      m_fileSize;               // File size
   uint16_t      m_blocksize;              // SCSI BLOCK size
   uint16_t      m_rawblocksize;           // OPTICAL raw sector size
