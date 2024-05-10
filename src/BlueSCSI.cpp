@@ -469,13 +469,13 @@ bool VerifyISOPVD(SCSI_DEVICE *dev, unsigned sector_size, bool mode2)
   if(mode2) seek += 8;
   bool ret = false;
 
-  dev->m_file->seekSet(seek);
-  dev->m_file->read(m_buf, 2048);
+  dev->m_file.seekSet(seek);
+  dev->m_file.read(m_buf, 2048);
 
   ret = ((m_buf[0] == 1 && !strncmp((char *)&m_buf[1], "CD001", 5) && m_buf[6] == 1) ||
         (m_buf[8] == 1 && !strncmp((char *)&m_buf[9], "CDROM", 5) && m_buf[14] == 1));
 
-  dev->m_file->rewind();
+  dev->m_file.rewind();
   return ret;
 }
 
@@ -490,22 +490,22 @@ bool hddimageOpen(SCSI_DEVICE *dev, FsFile *file,int id,int lun,int blocksize)
   dev->flags = 0;
   dev->m_blocksize = blocksize;
   dev->m_rawblocksize = blocksize;
-  dev->m_file = file;
-  if(!dev->m_file->isOpen()) {
+  dev->m_file = *file;
+  if(!dev->m_file.isOpen()) {
 #if DEBUG > 0
     LOG_FILE.println(" E: not open");
 #endif
     goto failed;
   }
 
-  dev->m_fileSize = dev->m_file->size();
+  dev->m_fileSize = dev->m_file.size();
 
   if(dev->m_fileSize < 1) {
     LOG_FILE.println(" E: 0 file");
     goto failed;
   }
 
-  if(!dev->m_file->isContiguous())
+  if(!dev->m_file.isContiguous())
   {
     LOG_FILE.println(" W: Fragmented. See https://bitly.cx/AQesm");
   }
@@ -571,7 +571,7 @@ bool hddimageOpen(SCSI_DEVICE *dev, FsFile *file,int id,int lun,int blocksize)
 
 failed:
   LOG_FILE.sync();
-  dev->m_file->close();
+  dev->m_file.close();
   dev->m_fileSize = dev->m_blocksize = 0; // no file
   //delete dev->m_file;
   //dev->m_file = NULL;
@@ -910,7 +910,7 @@ void setup()
 
 void findDriveImages(FsFile root) {
   bool image_ready;
-  FsFile *file;
+  FsFile file;
   char path_name[MAX_FILE_PATH+1];
   root.getName(path_name, sizeof(path_name));
   SD.chdir(path_name);
@@ -957,17 +957,17 @@ void findDriveImages(FsFile root) {
     switch (tolower(name[0])) {
     case 'h':
       device_type = SCSI_DEVICE_HDD;
-      file = new FsFile(SD.open(name, O_RDWR));
+      file = SD.open(name, O_RDWR);
       break;
     case 'c':
       device_type = SCSI_DEVICE_OPTICAL;
-      file = new FsFile(SD.open(name, O_RDONLY));
+      file = SD.open(name, O_RDONLY);
       break;
     default:
       continue;
     }
 
-    if(file && file->isFile()) {
+    if(file && file.isFile()) {
       // Defaults for Hard Disks
       int id  = DEFAULT_SCSI_ID; // 0 and 3 are common in Macs for physical HD and CD, so avoid them.
       int lun = DEFAULT_SCSI_LUN;
@@ -1044,7 +1044,7 @@ void findDriveImages(FsFile root) {
       scsi_device_list[id][lun] = &scsi_device_list_real[num_scsi_devices++];
       dev = scsi_device_list[id][lun];
       dev->m_type = device_type;
-      image_ready = hddimageOpen(dev, file, id, lun, blk);
+      image_ready = hddimageOpen(dev, &file, id, lun, blk);
 
       if(image_ready) { // Marked as a responsive ID
         scsi_id_mask |= 1<<id;
@@ -1059,12 +1059,12 @@ void findDriveImages(FsFile root) {
             //add active hard disk images to the USB passthrough list
             if (num_usb_volumes < USB_MASS_MAX_DRIVES) {
 #if DEBUG > 0
-              LOG_FILE.print("USB_PASSTHROUGH ID "); LOG_FILE.print(id); LOG_FILE.print(" LUN "); LOG_FILE.println(lun);
+              LOG_FILE.print(" USB_PASSTHROUGH ID "); LOG_FILE.print(id); LOG_FILE.print(" LUN "); LOG_FILE.println(lun);
               LOG_FILE.sync();
 #endif
               //only allow passthrough on 512 byte block images for now
               if (blk == SCSI_BLOCK_SIZE) {
-                usb_files[num_usb_volumes] = file;
+                usb_files[num_usb_volumes] = &dev->m_file;
                 num_usb_volumes += 1;
               }
             } else {
@@ -1085,11 +1085,9 @@ void findDriveImages(FsFile root) {
             break;
         }
       }
-      LOG_FILE.println();
+      LOG_FILE.println(" DONE");
+      LOG_FILE.sync();
     }
-#if DEBUG > 0
-    LOG_FILE.print("DONE file: "); LOG_FILE.println(name);
-#endif
     LOG_FILE.sync();
   }
   // cd .. before going back.
@@ -1152,7 +1150,7 @@ void finalizeDevices() {
       if(dev && dev->m_file)
       {
         char name[MAX_FILE_PATH+1];
-        dev->m_file->getName(name, sizeof(name));
+        dev->m_file.getName(name, sizeof(name));
         LOG_FILE.print(name);
         readSCSIDeviceConfig(id, dev);
       }
@@ -1413,7 +1411,7 @@ void writeDataPhaseSD(SCSI_DEVICE *dev, uint32_t adds, uint32_t len)
   SCSI_PHASE_CHANGE(SCSI_PHASE_DATAIN);
   //Bus settle delay 400ns, file.seek() measured at over 1000ns.
   uint64_t pos = (uint64_t)adds * dev->m_rawblocksize;
-  dev->m_file->seekSet(pos);
+  dev->m_file.seekSet(pos);
 #ifdef XCVR
   TRANSCEIVER_IO_SET(vTR_DBP,TR_OUTPUT)
 #endif
@@ -1422,7 +1420,7 @@ void writeDataPhaseSD(SCSI_DEVICE *dev, uint32_t adds, uint32_t len)
   for(uint32_t i = 0; i < len; i++) {
       // Asynchronous reads will make it faster ...
     m_resetJmp = false;
-    dev->m_file->read(m_buf, dev->m_rawblocksize);
+    dev->m_file.read(m_buf, dev->m_rawblocksize);
     enableResetJmp();
 
     writeDataLoop(dev->m_blocksize, &m_buf[dev->m_sector_offset]);
@@ -1494,18 +1492,18 @@ void readDataPhaseSD(SCSI_DEVICE *dev, uint32_t adds, uint32_t len)
   //Bus settle delay 400ns, file.seek() measured at over 1000ns.
 
   uint64_t pos = (uint64_t)adds * dev->m_blocksize;
-  dev->m_file->seekSet(pos);
+  dev->m_file.seekSet(pos);
   for(uint32_t i = 0; i < len; i++) {
     m_resetJmp = true;
     readDataLoop(dev->m_blocksize, m_buf);
     m_resetJmp = false;
-    dev->m_file->write(m_buf, dev->m_blocksize);
+    dev->m_file.write(m_buf, dev->m_blocksize);
     // If a reset happened while writing, break and let the flush happen before it is handled.
     if (m_isBusReset) {
       break;
     }
   }
-  dev->m_file->flush();
+  dev->m_file.flush();
   enableResetJmp();
 }
 
@@ -1520,7 +1518,7 @@ void verifyDataPhaseSD(SCSI_DEVICE *dev, uint32_t adds, uint32_t len)
   //Bus settle delay 400ns, file.seek() measured at over 1000ns.
 
   uint64_t pos = (uint64_t)adds * dev->m_blocksize;
-  dev->m_file->seekSet(pos);
+  dev->m_file.seekSet(pos);
   for(uint32_t i = 0; i < len; i++) {
     readDataLoop(dev->m_blocksize, m_buf);
     // This has just gone through the transfer to make things work, a compare would go here.
@@ -1758,7 +1756,7 @@ void scsi_loop()
   }
 
   dev = scsi_device_list[m_id][m_lun];
-  if(dev && !dev->m_file->isOpen())
+  if(dev && !dev->m_file.isOpen())
   {
     dev->m_senseKey = SCSI_SENSE_ILLEGAL_REQUEST;
     dev->m_additional_sense_code = SCSI_ASC_LOGICAL_UNIT_NOT_SUPPORTED;

@@ -5,7 +5,7 @@
 #include <SdFat.h>
 
 // SCSI config
-#define MAX_SCSI_DEVICES 21
+#define MAX_SCSI_DEVICES 33
 #define MAX_SCSIID  7           // Max SCSI device IDs
 #define MAX_SCSILUN 8           // Max LUN IDs
 #define NUM_SCSIID  MAX_SCSIID  // Number of enabled SCSI IDs
@@ -341,7 +341,7 @@ typedef struct _SCSI_INQUIRY_DATA
 // HDD image
 typedef __attribute__((aligned(4))) struct _SCSI_DEVICE
 {
-  FsFile        *m_file;                   // File object pointer
+  FsFile        m_file;                   // File object pointer
   uint64_t      m_fileSize;               // File size
   uint16_t      m_blocksize;              // SCSI BLOCK size
   uint16_t      m_rawblocksize;           // OPTICAL raw sector size
