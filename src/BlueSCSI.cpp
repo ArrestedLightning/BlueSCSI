@@ -865,7 +865,7 @@ void setup()
       }
 
       //allow 2 seconds for the PC to enumerate the USB device, otherwise switch to SCSI mode
-      #define USB_WAIT_S 3
+      #define USB_WAIT_S 2
       #define USB_WAIT_DELAY_MS 100
       for (int i = 0; i < USB_WAIT_S*1000/USB_WAIT_DELAY_MS; i += 1) {
 #if DEBUG > 0

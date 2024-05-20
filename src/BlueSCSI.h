@@ -6,7 +6,7 @@
 
 // SCSI config
 #define MAX_SCSI_DEVICES 33
-#define MAX_SCSIID  7           // Max SCSI device IDs
+#define MAX_SCSIID  8           // Max SCSI device IDs
 #define MAX_SCSILUN 8           // Max LUN IDs
 #define NUM_SCSIID  MAX_SCSIID  // Number of enabled SCSI IDs
 #define NUM_SCSILUN MAX_SCSILUN // Number of enabled LUNs
